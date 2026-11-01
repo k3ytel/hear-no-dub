@@ -56,6 +56,28 @@ public final class HearNoDubConfigScreen {
 						v -> String.format(Locale.ROOT, "%.2f s", v / 1000.0)))
 				.build();
 
+		// ------------------------------------------------------------ Video
+		ConfigCategory video = ConfigCategory.createBuilder()
+				.name(tr("category.video"))
+				.option(LabelOption.create(tr("video.help").withStyle(ChatFormatting.GRAY)))
+				.option(intSlider("seek_step", def.seekStepSec, () -> cfg.seekStepSec, v -> cfg.seekStepSec = v, 1, 60, 1,
+						v -> v + " s"))
+				.option(intSlider("volume_step", def.volumeStep, () -> cfg.volumeStep, v -> cfg.volumeStep = v, 1, 25, 1,
+						v -> v + "%"))
+				.option(bool("media_popup", def.mediaPopup, () -> cfg.mediaPopup, v -> cfg.mediaPopup = v))
+				.group(OptionGroup.createBuilder()
+						.name(tr("group.skip"))
+						.description(OptionDescription.of(tr("group.skip.desc")))
+						.option(bool("skip_times", def.skipTimes, () -> cfg.skipTimes, v -> cfg.skipTimes = v))
+						.option(bool("auto_skip_opening", def.autoSkipOpening, () -> cfg.autoSkipOpening, v -> cfg.autoSkipOpening = v))
+						.option(bool("auto_skip_ending", def.autoSkipEnding, () -> cfg.autoSkipEnding, v -> cfg.autoSkipEnding = v))
+						.option(intSlider("auto_skip_delay", def.autoSkipDelaySec, () -> cfg.autoSkipDelaySec,
+								v -> cfg.autoSkipDelaySec = v, 0, 10, 1, v -> v + " s"))
+						.option(intSlider("skip_fallback", def.skipFallbackSec, () -> cfg.skipFallbackSec,
+								v -> cfg.skipFallbackSec = v, 30, 180, 5, v -> v + " s"))
+						.build())
+				.build();
+
 		// ------------------------------------------------------------ Sources
 		ConfigCategory sources = ConfigCategory.createBuilder()
 				.name(tr("category.sources"))
@@ -185,6 +207,7 @@ public final class HearNoDubConfigScreen {
 		return YetAnotherConfigLib.createBuilder()
 				.title(tr("title"))
 				.category(general)
+				.category(video)
 				.category(sources)
 				.category(display)
 				.category(style)

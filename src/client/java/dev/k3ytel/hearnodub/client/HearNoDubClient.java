@@ -3,10 +3,13 @@ package dev.k3ytel.hearnodub.client;
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.k3ytel.hearnodub.client.config.HearNoDubConfig;
 import dev.k3ytel.hearnodub.client.gui.SubtitlePickerScreen;
+import dev.k3ytel.hearnodub.client.hud.MediaOsd;
 import dev.k3ytel.hearnodub.client.hud.ScreenModes;
 import dev.k3ytel.hearnodub.client.hud.SubtitleHud;
 import dev.k3ytel.hearnodub.client.hud.WorldSubtitles;
 import dev.k3ytel.hearnodub.client.media.MediaBridge;
+import dev.k3ytel.hearnodub.client.media.Playback;
+import dev.k3ytel.hearnodub.client.subs.IntroSkipper;
 import dev.k3ytel.hearnodub.client.subs.SubtitleManager;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
@@ -40,6 +43,11 @@ public class HearNoDubClient implements ClientModInitializer {
 	public static KeyMapping placeKey;
 	public static KeyMapping playPauseKey;
 	public static KeyMapping historyKey;
+	public static KeyMapping seekBackKey;
+	public static KeyMapping seekForwardKey;
+	public static KeyMapping skipKey;
+	public static KeyMapping volumeDownKey;
+	public static KeyMapping volumeUpKey;
 
 	/** Auto-pause bookkeeping: was the Esc menu open last tick, and did we pause the video. */
 	private static boolean wasPauseMenu;
@@ -58,9 +66,15 @@ public class HearNoDubClient implements ClientModInitializer {
 		placeKey = register("place", InputConstants.UNKNOWN.getValue());
 		playPauseKey = register("play_pause", InputConstants.KEY_P);
 		historyKey = register("history", InputConstants.KEY_H);
+		seekBackKey = register("seek_back", InputConstants.KEY_LEFT);
+		seekForwardKey = register("seek_forward", InputConstants.KEY_RIGHT);
+		skipKey = register("skip", InputConstants.KEY_O);
+		volumeDownKey = register("volume_down", InputConstants.KEY_MINUS);
+		volumeUpKey = register("volume_up", InputConstants.KEY_EQUALS);
 
 		// Drawn just below chat, so chat stays readable on top of the subtitles
 		HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT, id("subtitles"), new SubtitleHud());
+		HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT, id("media_popup"), new MediaOsd());
 		WorldSubtitles.register();
 
 		ClientTickEvents.END_CLIENT_TICK.register(HearNoDubClient::onEndTick);
@@ -75,8 +89,28 @@ public class HearNoDubClient implements ClientModInitializer {
 	private static void onEndTick(Minecraft mc) {
 		SubtitleManager manager = SubtitleManager.get();
 		manager.tick(mc);
+		IntroSkipper.get().tick(mc, manager.session());
 		ScreenModes.tick(mc);
 		autoPause(mc, manager);
+
+		HearNoDubConfig config = HearNoDubConfig.get();
+		while (seekBackKey.consumeClick()) {
+			Playback.skipBy(mc, -config.seekStepSec * 1000L,
+					Component.translatable("hear-no-dub.osd.back", config.seekStepSec));
+		}
+		while (seekForwardKey.consumeClick()) {
+			Playback.skipBy(mc, config.seekStepSec * 1000L,
+					Component.translatable("hear-no-dub.osd.forward", config.seekStepSec));
+		}
+		while (skipKey.consumeClick()) {
+			IntroSkipper.get().skipPressed(mc);
+		}
+		while (volumeDownKey.consumeClick()) {
+			Playback.changeVolume(mc, -1);
+		}
+		while (volumeUpKey.consumeClick()) {
+			Playback.changeVolume(mc, 1);
+		}
 
 		while (playPauseKey.consumeClick()) {
 			MediaBridge.Session s = manager.session();

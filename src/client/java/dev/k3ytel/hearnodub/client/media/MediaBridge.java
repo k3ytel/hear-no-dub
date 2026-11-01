@@ -42,8 +42,18 @@ public final class MediaBridge {
 			return "Playing".equalsIgnoreCase(status);
 		}
 
-		/** Current position: the snapshot plus the time since it was taken, while playing. */
+		/**
+		 * Current position: the snapshot plus the time since it was taken, while playing.
+		 * Right after the mod asks for a seek, the target is used until Windows reports the new
+		 * position (otherwise a second quick press would start from the old spot).
+		 */
 		public long livePositionMs(long nowMs) {
+			Seek seek = INSTANCE.lastSeek;
+			if (seek != null && seek.app.equals(app) && updated < seek.sentAt && nowMs - seek.sentAt < SEEK_HOLD_MS) {
+				long p = seek.targetMs + (isPlaying() ? Math.max(0, nowMs - seek.sentAt) : 0);
+				if (end > 0) p = Math.min(p, end);
+				return Math.max(0, p);
+			}
 			long p = pos;
 			if (isPlaying() && updated > 0) p += Math.max(0, nowMs - updated);
 			if (end > 0) p = Math.min(p, end);
@@ -54,6 +64,20 @@ public final class MediaBridge {
 			String a = app == null ? "" : app.toLowerCase(Locale.ROOT);
 			return a.contains("spotify") || a.contains("zunemusic") || a.contains("applemusic")
 					|| a.contains("deezer") || a.contains("tidal");
+		}
+
+		/** Windows process name that plays this app's sound ("firefox", "chrome", ...), or null. */
+		public String processName() {
+			return switch (appName()) {
+				case "Firefox" -> "firefox";
+				case "Edge" -> "msedge";
+				case "Chrome" -> "chrome";
+				case "Brave" -> "brave";
+				case "Opera" -> "opera";
+				case "Spotify" -> "Spotify";
+				case "VLC" -> "vlc";
+				default -> null;
+			};
 		}
 
 		/** Short readable name of the app ("Firefox", "Chrome", ...). */
@@ -76,13 +100,28 @@ public final class MediaBridge {
 		public String title = "";
 	}
 
+	/** Result of the last volume change: level 0..1, or -1 if it didn't work. */
+	public static final class Volume {
+		public String proc = "";
+		public double level = -1;
+		public int seq;
+	}
+
 	public static final class Snapshot {
 		public List<Session> sessions = List.of();
 		public List<Window> windows = List.of();
+		public Volume vol;
 		public String error;
 	}
 
+	/** A seek the mod just asked for. */
+	private record Seek(String app, long targetMs, long sentAt) {}
+
+	private static final long SEEK_HOLD_MS = 3000;
+
 	private volatile Snapshot latest = new Snapshot();
+	private volatile Volume lastVolume;
+	private volatile Seek lastSeek;
 	private volatile Status status = Status.STARTING;
 	private volatile String lastError = "";
 	private volatile boolean stopping = false;
@@ -103,6 +142,27 @@ public final class MediaBridge {
 		return status;
 	}
 
+	/** The last volume change the bridge reported, or null. */
+	public Volume lastVolume() {
+		return lastVolume;
+	}
+
+	/** Asks the app to jump to a position (ms). Returns false when the bridge isn't running. */
+	public boolean seek(Session s, long targetMs) {
+		if (s == null) return false;
+		long target = Math.max(0, s.end > 0 ? Math.min(targetMs, s.end - 500) : targetMs);
+		if (!writeCommand("seek " + target + " " + s.app)) return false;
+		lastSeek = new Seek(s.app, target, System.currentTimeMillis());
+		return true;
+	}
+
+	/** Changes the app's own volume (Windows volume mixer) by delta (-1..1). */
+	public boolean changeVolume(Session s, double delta) {
+		String proc = s == null ? null : s.processName();
+		if (proc == null) return false;
+		return writeCommand(String.format(Locale.ROOT, "vol %.2f %s", delta, proc));
+	}
+
 	public String lastError() {
 		return lastError;
 	}
@@ -120,21 +180,26 @@ public final class MediaBridge {
 	}
 
 	/**
-	 * Asks the bridge to "toggle", "pause" or "play" the given app's media. Works through small
-	 * command files the bridge checks every 100 ms. Returns false when the bridge isn't running.
+	 * Asks the bridge to "toggle", "pause" or "play" the given app's media. Commands go through
+	 * small files the bridge checks every 100 ms. Returns false when the bridge isn't running.
 	 */
 	public boolean sendCommand(String action, String app) {
-		if (status != Status.RUNNING || app == null || app.isEmpty()) return false;
+		if (app == null || app.isEmpty()) return false;
+		return writeCommand(action + " " + app);
+	}
+
+	private boolean writeCommand(String command) {
+		if (status != Status.RUNNING) return false;
 		try {
 			Path dir = HearNoDubConfig.DIR.resolve("cmd");
 			Files.createDirectories(dir);
 			String name = System.nanoTime() + "";
 			Path tmp = dir.resolve(name + ".tmp");
-			Files.writeString(tmp, action + " " + app, StandardCharsets.UTF_8);
+			Files.writeString(tmp, command, StandardCharsets.UTF_8);
 			Files.move(tmp, dir.resolve(name + ".cmd"), StandardCopyOption.ATOMIC_MOVE);
 			return true;
 		} catch (IOException e) {
-			HearNoDubClient.LOGGER.warn("Could not send '{}' to the media bridge", action, e);
+			HearNoDubClient.LOGGER.warn("Could not send '{}' to the media bridge", command, e);
 			return false;
 		}
 	}
@@ -200,6 +265,8 @@ public final class MediaBridge {
 					HearNoDubClient.LOGGER.warn("Media bridge error: {}", snap.error);
 					continue;
 				}
+				if (snap.vol != null) lastVolume = snap.vol;
+				if (snap.sessions == null && snap.windows == null) continue; // volume-only line
 				if (snap.sessions == null) snap.sessions = List.of();
 				if (snap.windows == null) snap.windows = List.of();
 				latest = snap;

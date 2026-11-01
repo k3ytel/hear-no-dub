@@ -145,6 +145,7 @@ public final class SubtitleManager {
 		clearTrack();
 		results = List.of();
 		guess = TitleGuesser.guess(s, windows);
+		IntroSkipper.get().onNewVideo(videoKey, s, guess);
 		HearNoDubClient.LOGGER.info("New video: app='{}' title='{}' artist='{}' album='{}' end={}ms tab='{}' -> guess '{}'",
 				s.app, s.title, s.artist, s.album, s.end, guess.tabTitle(), guess.describe());
 
@@ -273,6 +274,7 @@ public final class SubtitleManager {
 
 				mc.execute(() -> {
 					busy = false;
+					IntroSkipper.get().onEpisodeKnown(forVideo, query, fs, fe, session);
 					if (!java.util.Objects.equals(forVideo, videoKey) && autoPick) return;
 					results = entries;
 					if (autoPick) guess = new TitleGuesser.Guess(query, fs, fe, tab);
@@ -553,6 +555,23 @@ public final class SubtitleManager {
 		return t.between(now - 40_000, now + 20_000);
 	}
 
+	/** Every line of the loaded subtitles (for searching), or empty. */
+	public List<SubtitleTrack.Cue> allCues() {
+		SubtitleTrack t = track;
+		return t == null ? List.of() : t.all();
+	}
+
+	/** How long before a line the video starts when you jump to it. */
+	private static final long JUMP_LEAD_MS = 500;
+
+	/** Jumps the video to where this line is spoken (taking the sync offset into account). */
+	public void jumpTo(Minecraft mc, SubtitleTrack.Cue cue) {
+		if (track == null) return;
+		long target = Math.max(0, cue.startMs() - shiftMs - JUMP_LEAD_MS);
+		dev.k3ytel.hearnodub.client.media.Playback.seekTo(mc, target,
+				Component.translatable("hear-no-dub.osd.jumped"));
+	}
+
 	/** Current time in the subtitle file (video time + offset), or -1. */
 	public long subtitleTimeMs() {
 		MediaBridge.Session s = session;
@@ -619,6 +638,8 @@ public final class SubtitleManager {
 	public String trackKey() { return trackKey; }
 	public String trackLabel() { return trackLabel; }
 	public boolean hasTrack() { return track != null; }
+	/** Sync offset in ms (positive = subtitles earlier). */
+	public long shiftMs() { return shiftMs; }
 
 	/** Cycles which app's media is followed (when several are open). */
 	public void switchSession() {

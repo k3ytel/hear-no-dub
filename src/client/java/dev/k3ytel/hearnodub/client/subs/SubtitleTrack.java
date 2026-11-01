@@ -39,6 +39,11 @@ public final class SubtitleTrack {
 		this.longestMs = longest;
 	}
 
+	/** All cues, in start order. */
+	public List<Cue> all() {
+		return cues;
+	}
+
 	public int size() {
 		return cues.size();
 	}

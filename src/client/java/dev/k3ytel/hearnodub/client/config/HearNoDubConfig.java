@@ -100,6 +100,22 @@ public final class HearNoDubConfig {
 	// ---------------------------------------------------------------- video control
 	/** Pause the video when the Esc menu opens, resume when it closes. */
 	public boolean autoPause = true;
+	/** How far the skip back / forward keys jump, in seconds. */
+	public int seekStepSec = 10;
+	/** How much one press of the volume keys changes the browser's volume, in percent. */
+	public int volumeStep = 10;
+	/** Show the small popup at the top of the screen after seeking or changing the volume. */
+	public boolean mediaPopup = true;
+
+	// ---------------------------------------------------------------- skip intro / ending
+	/** Look up opening/ending times (AniSkip) and offer to skip them. */
+	public boolean skipTimes = true;
+	public boolean autoSkipOpening = false;
+	public boolean autoSkipEnding = false;
+	/** Seconds the "Skipping opening in…" countdown runs before an automatic skip. */
+	public int autoSkipDelaySec = 3;
+	/** How far the skip key jumps when no opening/ending is playing (typical anime opening length). */
+	public int skipFallbackSec = 85;
 	public WorldAnchor worldAnchor = WorldAnchor.FOLLOW;
 	/** Distance in blocks in front of you (follow mode, and where "place here" puts it). */
 	public float worldDistance = 4.0f;
@@ -190,6 +206,10 @@ public final class HearNoDubConfig {
 		backgroundOpacity = Math.max(0, Math.min(100, backgroundOpacity));
 		maxLineWidth = Math.max(100, Math.min(800, maxLineWidth));
 		nudgeMs = Math.max(50, Math.min(2000, nudgeMs));
+		seekStepSec = Math.max(1, Math.min(120, seekStepSec == 0 ? 10 : seekStepSec));
+		volumeStep = Math.max(1, Math.min(50, volumeStep == 0 ? 10 : volumeStep));
+		autoSkipDelaySec = Math.max(0, Math.min(10, autoSkipDelaySec));
+		skipFallbackSec = Math.max(10, Math.min(300, skipFallbackSec == 0 ? 85 : skipFallbackSec));
 		posX = Math.max(0f, Math.min(1f, posX));
 		posY = Math.max(0f, Math.min(1f, posY));
 	}
