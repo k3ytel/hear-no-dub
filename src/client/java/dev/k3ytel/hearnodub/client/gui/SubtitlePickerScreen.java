@@ -135,7 +135,7 @@ public class SubtitlePickerScreen extends Screen {
 		visibleRows = Math.max(1, (listBottom - listTop) / ROW_H);
 
 		// Bottom buttons
-		int count = 8;
+		int count = 9;
 		int by = height - 26;
 		int bw = Math.min(80, (width - 20 - (count - 1) * gap) / count);
 		int bx = (width - (bw * count + gap * (count - 1))) / 2;
@@ -163,6 +163,9 @@ public class SubtitlePickerScreen extends Screen {
 		bx += bw + gap;
 		addRenderableWidget(Button.builder(Component.translatable("hear-no-dub.picker.unload"),
 				b -> manager.unload()).bounds(bx, by, bw, 20).build());
+		bx += bw + gap;
+		addRenderableWidget(Button.builder(Component.translatable("hear-no-dub.picker.video"),
+				b -> minecraft.gui.setScreen(new VideoMenuScreen(this))).bounds(bx, by, bw, 20).build());
 		bx += bw + gap;
 		addRenderableWidget(Button.builder(Component.translatable("hear-no-dub.picker.settings"),
 				b -> minecraft.gui.setScreen(HearNoDubConfigScreen.create(this))).bounds(bx, by, bw, 20).build());

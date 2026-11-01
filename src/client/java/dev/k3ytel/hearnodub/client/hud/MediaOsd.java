@@ -48,6 +48,12 @@ public class MediaOsd implements HudElement {
 		volumeApp = appName;
 	}
 
+	/** Shows a volume level right away (when the mod already knows it). */
+	public static void showVolume(String appName, double level) {
+		volumeLevel = level;
+		show(Kind.VOLUME, Component.translatable("hear-no-dub.osd.volume", appName));
+	}
+
 	private static void show(Kind k, Component text) {
 		kind = k;
 		label = text;

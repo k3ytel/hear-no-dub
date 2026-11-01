@@ -43,6 +43,7 @@ public final class Playback {
 			return;
 		}
 		double step = HearNoDubConfig.get().volumeStep / 100.0;
+		if (VolumeFade.adjustBase(s, direction * step)) return; // fading with distance: change the full volume instead
 		if (MediaBridge.get().changeVolume(s, direction * step)) MediaOsd.expectVolume(s.appName());
 		else nothingPlaying(mc);
 	}

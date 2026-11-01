@@ -91,6 +91,15 @@ namespace HearNoDub {
 		/// Changes the volume of every audio session of the processes with this name
 		/// (browsers play sound from several processes). Returns the new level 0..1, or -1.
 		public static float Change(string processName, float delta) {
+			return Apply(processName, delta, false);
+		}
+
+		/// Sets the volume to an exact level 0..1. Returns the new level, or -1.
+		public static float Set(string processName, float level) {
+			return Apply(processName, level, true);
+		}
+
+		static float Apply(string processName, float value, bool absolute) {
 			float result = -1f;
 			float target = -1f;
 			IMMDeviceEnumerator devices = (IMMDeviceEnumerator)(new MMDeviceEnumerator());
@@ -116,7 +125,7 @@ namespace HearNoDub {
 				if (target < 0f) {
 					float current;
 					if (vol.GetMasterVolume(out current) != 0) continue;
-					target = (float)(Math.Round((current + delta) * 100.0) / 100.0);
+					target = absolute ? value : (float)(Math.Round((current + value) * 100.0) / 100.0);
 					if (target < 0f) target = 0f;
 					if (target > 1f) target = 1f;
 				}
@@ -141,7 +150,8 @@ $script:volSeq = 0
 # Commands from the mod: files "<id>.cmd" containing one of
 #   toggle|pause|play <app id>
 #   seek <position ms> <app id>
-#   vol <delta 0..1, may be negative> <process name>
+#   vol <delta 0..1, may be negative> <process name>   (0 = just report the current level)
+#   volset <level 0..1> <process name>
 function Invoke-Commands {
 	if (-not (Test-Path $cmdDir)) { return }
 	foreach ($f in (Get-ChildItem -Path $cmdDir -Filter '*.cmd' -ErrorAction SilentlyContinue | Sort-Object Name)) {
@@ -151,6 +161,16 @@ function Invoke-Commands {
 			$parts = $line -split ' ', 3
 			if ($parts.Count -lt 2) { continue }
 
+			if ($parts[0] -eq 'volset') {
+				# Volume fade with distance: set an exact level, no report (it happens many times a second)
+				if ($volumeReady -and $parts.Count -ge 3) {
+					try {
+						$level = [float]::Parse($parts[1], [System.Globalization.CultureInfo]::InvariantCulture)
+						[HearNoDub.AppVolume]::Set($parts[2], $level) | Out-Null
+					} catch {}
+				}
+				continue
+			}
 			if ($parts[0] -eq 'vol') {
 				if ($parts.Count -lt 3) { continue }
 				$level = -1

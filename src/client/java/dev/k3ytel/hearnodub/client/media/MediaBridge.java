@@ -156,6 +156,13 @@ public final class MediaBridge {
 		return true;
 	}
 
+	/** Sets the app's own volume to an exact level (0..1), without a report back. */
+	public boolean setVolume(Session s, double level) {
+		String proc = s == null ? null : s.processName();
+		if (proc == null) return false;
+		return writeCommand(String.format(Locale.ROOT, "volset %.2f %s", Math.max(0, Math.min(1, level)), proc));
+	}
+
 	/** Changes the app's own volume (Windows volume mixer) by delta (-1..1). */
 	public boolean changeVolume(Session s, double delta) {
 		String proc = s == null ? null : s.processName();
@@ -253,6 +260,16 @@ public final class MediaBridge {
 				line = line.trim();
 				if (line.startsWith("﻿")) line = line.substring(1);
 				if (!line.startsWith("{")) continue;
+				if (!line.contains("\"sessions\"") && line.contains("\"vol\"")) {
+					// A volume-only report. Must not replace the snapshot: Gson would fill in an
+					// empty session list and the video would look gone for half a second.
+					try {
+						Snapshot v = GSON.fromJson(line, Snapshot.class);
+						if (v != null && v.vol != null) lastVolume = v.vol;
+					} catch (Exception ignored) {
+					}
+					continue;
+				}
 				Snapshot snap;
 				try {
 					snap = GSON.fromJson(line, Snapshot.class);
@@ -266,7 +283,6 @@ public final class MediaBridge {
 					continue;
 				}
 				if (snap.vol != null) lastVolume = snap.vol;
-				if (snap.sessions == null && snap.windows == null) continue; // volume-only line
 				if (snap.sessions == null) snap.sessions = List.of();
 				if (snap.windows == null) snap.windows = List.of();
 				latest = snap;

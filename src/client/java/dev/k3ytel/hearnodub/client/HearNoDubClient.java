@@ -2,8 +2,10 @@ package dev.k3ytel.hearnodub.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.k3ytel.hearnodub.client.config.HearNoDubConfig;
+import dev.k3ytel.hearnodub.client.config.VideoMode;
 import dev.k3ytel.hearnodub.client.gui.SubtitlePickerScreen;
 import dev.k3ytel.hearnodub.client.hud.MediaOsd;
+import dev.k3ytel.hearnodub.client.hud.VideoHud;
 import dev.k3ytel.hearnodub.client.hud.ScreenModes;
 import dev.k3ytel.hearnodub.client.hud.SubtitleHud;
 import dev.k3ytel.hearnodub.client.hud.WorldSubtitles;
@@ -11,6 +13,7 @@ import dev.k3ytel.hearnodub.client.media.MediaBridge;
 import dev.k3ytel.hearnodub.client.media.Playback;
 import dev.k3ytel.hearnodub.client.subs.IntroSkipper;
 import dev.k3ytel.hearnodub.client.subs.SubtitleManager;
+import dev.k3ytel.hearnodub.client.video.VideoCapture;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -48,6 +51,11 @@ public class HearNoDubClient implements ClientModInitializer {
 	public static KeyMapping skipKey;
 	public static KeyMapping volumeDownKey;
 	public static KeyMapping volumeUpKey;
+	public static KeyMapping videoKey;
+	public static KeyMapping videoPlaceKey;
+	public static KeyMapping videoModeKey;
+	public static KeyMapping tvBiggerKey;
+	public static KeyMapping tvSmallerKey;
 
 	/** Auto-pause bookkeeping: was the Esc menu open last tick, and did we pause the video. */
 	private static boolean wasPauseMenu;
@@ -71,14 +79,33 @@ public class HearNoDubClient implements ClientModInitializer {
 		skipKey = register("skip", InputConstants.KEY_O);
 		volumeDownKey = register("volume_down", InputConstants.KEY_MINUS);
 		volumeUpKey = register("volume_up", InputConstants.KEY_EQUALS);
+		videoKey = register("video", InputConstants.KEY_V);
+		videoPlaceKey = register("video_place", InputConstants.KEY_B);
+		videoModeKey = register("video_mode", InputConstants.KEY_N);
+		tvBiggerKey = register("tv_bigger", InputConstants.KEY_UP);
+		tvSmallerKey = register("tv_smaller", InputConstants.KEY_DOWN);
 
 		// Drawn just below chat, so chat stays readable on top of the subtitles
+		// Video under everything else, so the hotbar, subtitles and popups stay on top of it
+		HudElementRegistry.addFirst(id("video"), new VideoHud());
 		HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT, id("subtitles"), new SubtitleHud());
 		HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT, id("media_popup"), new MediaOsd());
+		// Video first: it tells the subtitles where an attached screen is this frame
+		dev.k3ytel.hearnodub.client.hud.VideoWorld.register();
 		WorldSubtitles.register();
 
 		ClientTickEvents.END_CLIENT_TICK.register(HearNoDubClient::onEndTick);
-		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> MediaBridge.get().stop());
+		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> {
+			// Put the browser's volume back before the bridge goes away
+			if (dev.k3ytel.hearnodub.client.media.VolumeFade.restore()) {
+				try {
+					Thread.sleep(300);
+				} catch (InterruptedException ignored) {
+				}
+			}
+			MediaBridge.get().stop();
+			VideoCapture.get().stop();
+		});
 	}
 
 	private static KeyMapping register(String name, int key) {
@@ -90,6 +117,8 @@ public class HearNoDubClient implements ClientModInitializer {
 		SubtitleManager manager = SubtitleManager.get();
 		manager.tick(mc);
 		IntroSkipper.get().tick(mc, manager.session());
+		VideoCapture.get().tick();
+		dev.k3ytel.hearnodub.client.media.VolumeFade.tick(mc);
 		ScreenModes.tick(mc);
 		autoPause(mc, manager);
 
@@ -110,6 +139,30 @@ public class HearNoDubClient implements ClientModInitializer {
 		}
 		while (volumeUpKey.consumeClick()) {
 			Playback.changeVolume(mc, 1);
+		}
+		while (videoPlaceKey.consumeClick()) {
+			dev.k3ytel.hearnodub.client.video.TvScreen.place(mc);
+		}
+		while (tvBiggerKey.consumeClick()) {
+			dev.k3ytel.hearnodub.client.video.TvScreen.resize(mc, 1.1f);
+		}
+		while (tvSmallerKey.consumeClick()) {
+			dev.k3ytel.hearnodub.client.video.TvScreen.resize(mc, 1 / 1.1f);
+		}
+		while (videoModeKey.consumeClick()) {
+			// Cycle through the video modes (and turn the video on if it was off)
+			VideoMode[] modes = VideoMode.values();
+			if (config.videoEnabled) config.videoMode = modes[(config.videoMode.ordinal() + 1) % modes.length];
+			else VideoCapture.get().resetFailures();
+			config.videoEnabled = true;
+			HearNoDubConfig.save();
+			overlay(mc, Component.translatable("hear-no-dub.msg.video_mode", config.videoMode.display()));
+		}
+		while (videoKey.consumeClick()) {
+			config.videoEnabled = !config.videoEnabled;
+			if (config.videoEnabled) VideoCapture.get().resetFailures();
+			HearNoDubConfig.save();
+			overlay(mc, Component.translatable(config.videoEnabled ? "hear-no-dub.msg.video_on" : "hear-no-dub.msg.video_off"));
 		}
 
 		while (playPauseKey.consumeClick()) {

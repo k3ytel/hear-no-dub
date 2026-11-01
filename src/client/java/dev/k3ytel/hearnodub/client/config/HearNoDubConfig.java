@@ -107,6 +107,56 @@ public final class HearNoDubConfig {
 	/** Show the small popup at the top of the screen after seeking or changing the volume. */
 	public boolean mediaPopup = true;
 
+	// ---------------------------------------------------------------- video in the game (experimental)
+	/** Show the browser's video in the corner of the HUD (V). */
+	public boolean videoEnabled = false;
+	/** Frames per second the capture helper aims for. */
+	public int videoFps = 24;
+	/** Max picture height in pixels (360, 480, 720, 1080). */
+	public int videoQuality = 480;
+	public VideoMode videoMode = VideoMode.PICTURE_IN_PICTURE;
+	/** Width of the picture-in-picture box, in percent of the screen width. */
+	public int videoSize = 35;
+	/** Where the picture-in-picture box sits: 0 = left/top edge, 1 = right/bottom edge of the free space. */
+	public float videoPosX = 1f;
+	public float videoPosY = 0f;
+	/** Picture-in-picture opacity in percent. */
+	public int videoOpacity = 100;
+	/** Faded background opacity in percent. */
+	public int videoBackgroundOpacity = 35;
+	/** Width in blocks of the floating video screen. */
+	public float videoWorldWidth = 2.0f;
+	/** Distance in blocks of the floating screen in front of you. */
+	public float videoWorldDistance = 3.0f;
+	/** Height of the floating screen relative to eye level, in blocks. */
+	public float videoWorldHeight = 0.0f;
+	/** Width in blocks of the screen above a mob. */
+	public float videoMobWidth = 1.2f;
+	/** Gap in blocks between a mob's head and its screen. */
+	public float videoMobLift = 0.35f;
+	/** "Floating, to the side": how far to the right (negative = left) of your view, in degrees. */
+	public int videoSideAngle = 35;
+	/** "Floating, to the side": how far up (negative = down) from your view, in degrees. */
+	public int videoSideTilt = 5;
+	/** Floating screens: roughly how many seconds they take to catch up with your view (0 = glued). */
+	public float videoFollowDelay = 0.8f;
+	/** How far in front of you a TV placed in the air goes. */
+	public float videoTvDistance = 3.0f;
+	/** Use a hand-picked video area instead of auto-detection (set in the "Fix video area" screen). */
+	public boolean videoCropManual = false;
+	/** The hand-picked area in window pixels, and the window size it was picked for. */
+	public int videoCropX, videoCropY, videoCropW, videoCropH, videoCropWinW, videoCropWinH;
+	/** Width in blocks of a newly placed TV. */
+	public float videoTvWidth = 3.0f;
+	/** When placing the TV on a wall, make it as big as the flat wall around it allows. */
+	public boolean videoTvFitWall = true;
+	/** Show 3D subtitles under the video screen (above it for a mob screen) instead of their own 3D mode. */
+	public boolean videoSubsAttach = true;
+	/** Lower the browser's volume the farther you are from the video screen. */
+	public boolean videoDistanceVolume = false;
+	/** Distance in blocks at which the sound is gone. */
+	public int videoVolumeRange = 24;
+
 	// ---------------------------------------------------------------- skip intro / ending
 	/** Look up opening/ending times (AniSkip) and offer to skip them. */
 	public boolean skipTimes = true;
@@ -210,6 +260,25 @@ public final class HearNoDubConfig {
 		volumeStep = Math.max(1, Math.min(50, volumeStep == 0 ? 10 : volumeStep));
 		autoSkipDelaySec = Math.max(0, Math.min(10, autoSkipDelaySec));
 		skipFallbackSec = Math.max(10, Math.min(300, skipFallbackSec == 0 ? 85 : skipFallbackSec));
+		videoFps = Math.max(5, Math.min(30, videoFps == 0 ? 24 : videoFps));
+		videoQuality = Math.max(240, Math.min(1080, videoQuality == 0 ? 480 : videoQuality));
+		videoSize = Math.max(10, Math.min(90, videoSize == 0 ? 35 : videoSize));
+		if (videoMode == null) videoMode = VideoMode.PICTURE_IN_PICTURE;
+		videoWorldWidth = Math.max(0.5f, Math.min(8f, videoWorldWidth == 0 ? 2f : videoWorldWidth));
+		videoWorldDistance = Math.max(1f, Math.min(16f, videoWorldDistance == 0 ? 3f : videoWorldDistance));
+		videoWorldHeight = Math.max(-3f, Math.min(3f, videoWorldHeight));
+		videoMobWidth = Math.max(0.3f, Math.min(4f, videoMobWidth == 0 ? 1.2f : videoMobWidth));
+		videoTvWidth = Math.max(0.5f, Math.min(16f, videoTvWidth == 0 ? 3f : videoTvWidth));
+		videoMobLift = Math.max(0f, Math.min(3f, videoMobLift));
+		videoSideAngle = Math.max(-80, Math.min(80, videoSideAngle));
+		videoSideTilt = Math.max(-40, Math.min(40, videoSideTilt));
+		videoFollowDelay = Math.max(0f, Math.min(3f, videoFollowDelay));
+		videoTvDistance = Math.max(1f, Math.min(16f, videoTvDistance == 0 ? 3f : videoTvDistance));
+		videoVolumeRange = Math.max(6, Math.min(96, videoVolumeRange == 0 ? 24 : videoVolumeRange));
+		videoPosX = Math.max(0f, Math.min(1f, videoPosX));
+		videoPosY = Math.max(0f, Math.min(1f, videoPosY));
+		videoOpacity = Math.max(10, Math.min(100, videoOpacity == 0 ? 100 : videoOpacity));
+		videoBackgroundOpacity = Math.max(5, Math.min(100, videoBackgroundOpacity == 0 ? 35 : videoBackgroundOpacity));
 		posX = Math.max(0f, Math.min(1f, posX));
 		posY = Math.max(0f, Math.min(1f, posY));
 	}

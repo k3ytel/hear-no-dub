@@ -68,8 +68,10 @@ public final class WorldSubtitles {
 		HearNoDubConfig cfg = HearNoDubConfig.get();
 		Minecraft mc = Minecraft.getInstance();
 		if (!cfg.enabled || mc.player == null || mc.level == null) return;
+		// Subtitles attached to the video screen win over the normal 3D mode
+		VideoWorld.Attach att = cfg.videoSubsAttach && cfg.videoEnabled ? VideoWorld.attach() : null;
 		WorldMode mode = effectiveMode(mc, cfg);
-		if (mode == WorldMode.NONE) return;
+		if (mode == WorldMode.NONE && att == null) return;
 		if (mc.gui.hud.isHidden()) return;
 
 		CameraRenderState cam = ctx.levelState().cameraRenderState;
@@ -77,6 +79,16 @@ public final class WorldSubtitles {
 
 		SubtitleManager m = SubtitleManager.get();
 		List<SubtitleTrack.Cue> cues = m.activeCues();
+		if (att != null) {
+			if (cues.isEmpty()) return;
+			SubStyle st = SubStyle.resolve(cfg, true);
+			SubText.Block b = SubText.build(mc.font, cues, null, m.subtitleTimeMs(), cfg, WRAP_PX, st.textColor());
+			if (b.isEmpty()) return;
+			// Text size follows the screen: about right for a 2.5-block screen at scale 1
+			float scale = cfg.worldScale * Math.max(0.5f, Math.min(4f, att.screenWidth() / 2.5f));
+			draw(ctx, mc.font, b, st, cfg, att.pos(), cam, scale, false, att.rotation(), att.above() ? 1 : 2);
+			return;
+		}
 		long groupKey = cues.isEmpty() ? Long.MIN_VALUE : cues.stream().mapToLong(SubtitleTrack.Cue::startMs).min().getAsLong();
 		if (mode == WorldMode.FLOATING) updateAnchor(cfg, mc.level, cam, groupKey);
 		if (cues.isEmpty()) return;
@@ -121,6 +133,15 @@ public final class WorldSubtitles {
 
 	private static void draw(LevelRenderContext ctx, Font font, SubText.Block block, SubStyle style, HearNoDubConfig cfg,
 			Vec3 pos, CameraRenderState cam, float scale, boolean bubble) {
+		draw(ctx, font, block, style, cfg, pos, cam, scale, bubble, null, bubble ? 1 : 0);
+	}
+
+	/**
+	 * @param rotation fixed rotation (a TV), or null to turn toward you
+	 * @param vAnchor  0 = centred on pos, 1 = standing on pos (above it), 2 = hanging from pos (below it)
+	 */
+	private static void draw(LevelRenderContext ctx, Font font, SubText.Block block, SubStyle style, HearNoDubConfig cfg,
+			Vec3 pos, CameraRenderState cam, float scale, boolean bubble, Quaternionf rotation, int vAnchor) {
 		SubmitNodeCollector out = ctx.submitNodeCollector();
 		PoseStack pose = ctx.poseStack();
 		Font.DisplayMode mode = cfg.worldSeeThrough ? Font.DisplayMode.SEE_THROUGH : Font.DisplayMode.POLYGON_OFFSET;
@@ -130,11 +151,16 @@ public final class WorldSubtitles {
 		pose.pushPose();
 		// The pose stack is relative to the camera position
 		pose.translate(pos.x - cam.pos.x, pos.y - cam.pos.y, pos.z - cam.pos.z);
-		pose.rotate(facing(cam, cfg, pos));
+		pose.rotate(rotation != null ? rotation : facing(cam, cfg, pos));
 		float s = PIXEL * scale * block.scale();
 		pose.scale(s, -s, s);
 		// Bubbles sit on top of their anchor; everything else is centred on it
-		pose.translate(-w / 2f, bubble ? -h - 8f : -h / 2f, 0f);
+		float dy = switch (vAnchor) {
+			case 1 -> bubble ? -h - 8f : -h - 4f;
+			case 2 -> 4f;
+			default -> -h / 2f;
+		};
+		pose.translate(-w / 2f, dy, 0.01f / s); // a hair in front of a screen it's attached to
 
 		boolean box = style.box() || bubble;
 		if (box) {
@@ -174,7 +200,7 @@ public final class WorldSubtitles {
 	 *   <li>TOWARD_ME_VERTICAL: same, but only turns around the vertical axis</li>
 	 * </ul>
 	 */
-	private static Quaternionf facing(CameraRenderState cam, HearNoDubConfig cfg, Vec3 pos) {
+	static Quaternionf facing(CameraRenderState cam, HearNoDubConfig cfg, Vec3 pos) {
 		switch (cfg.billboard) {
 			case FACE_CAMERA -> {
 				return cam.orientation;
@@ -193,9 +219,14 @@ public final class WorldSubtitles {
 				if (cfg.billboard == Billboard.TOWARD_ME_VERTICAL) back.y = 0;
 				if (back.lengthSquared() < 1e-6f) return cam.orientation;
 				back.normalize();
-				Vector3f worldUp = new Vector3f(0, 1, 0);
-				Vector3f right = new Vector3f(worldUp).cross(back);
-				if (right.lengthSquared() < 1e-6f) return cam.orientation; // text straight above/below you
+				// "Right" comes from the camera (always level in Minecraft), made square to "back".
+				// Using world-up here instead flips the text when it's straight below or above you.
+				Vector3f right = cam.orientation.transform(new Vector3f(1, 0, 0));
+				right.sub(new Vector3f(back).mul(right.dot(back)));
+				if (right.lengthSquared() < 1e-6f) {
+					right = new Vector3f(0, 1, 0).cross(back);
+					if (right.lengthSquared() < 1e-6f) return cam.orientation;
+				}
 				right.normalize();
 				Vector3f up = new Vector3f(back).cross(right);
 				return basis(right, up, back);
@@ -298,7 +329,7 @@ public final class WorldSubtitles {
 	}
 
 	/** The living entity closest to the centre of your view, within range and ~20°. */
-	private static Entity lookedAtMob(Minecraft mc, HearNoDubConfig cfg, CameraRenderState cam) {
+	static Entity lookedAtMob(Minecraft mc, HearNoDubConfig cfg, CameraRenderState cam) {
 		if (mc.crosshairPickEntity instanceof LivingEntity le && le != mc.player && le.isAlive()) return le;
 		Vec3 look = Vec3.directionFromRotation(cam.xRot, cam.yRot);
 		double best = Math.cos(Math.toRadians(20));
