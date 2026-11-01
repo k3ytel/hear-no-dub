@@ -136,6 +136,11 @@ public final class VideoCapture {
 		return app;
 	}
 
+	/** Average colour of the current picture, 0xRRGGBB (black when unknown). */
+	public int averageColor() {
+		return buffer == null ? 0 : buffer.getInt(88) & 0xFFFFFF;
+	}
+
 	/** Average time the helper needs per frame, in ms (0 when unknown). */
 	public double captureMs() {
 		return buffer == null ? 0 : buffer.getInt(44) / 10.0;

@@ -23,7 +23,7 @@ import java.util.zip.ZipInputStream;
 public final class Http {
 	private Http() {}
 
-	public static final String USER_AGENT = "HearNoDub v0.4.0";
+	public static final String USER_AGENT = "HearNoDub v0.5.0";
 
 	public static final HttpClient CLIENT = HttpClient.newBuilder()
 			.connectTimeout(Duration.ofSeconds(10))

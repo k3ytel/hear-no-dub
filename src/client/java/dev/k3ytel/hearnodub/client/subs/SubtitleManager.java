@@ -555,6 +555,12 @@ public final class SubtitleManager {
 		return t.between(now - 40_000, now + 20_000);
 	}
 
+	/** Lines starting between two subtitle times (for danmaku), in start order. */
+	public List<SubtitleTrack.Cue> cuesStartedBetween(long fromMs, long toMs) {
+		SubtitleTrack t = track;
+		return t == null ? List.of() : t.between(fromMs, toMs);
+	}
+
 	/** Every line of the loaded subtitles (for searching), or empty. */
 	public List<SubtitleTrack.Cue> allCues() {
 		SubtitleTrack t = track;

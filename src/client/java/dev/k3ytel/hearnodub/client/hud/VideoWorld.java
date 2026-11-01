@@ -188,6 +188,8 @@ public final class VideoWorld {
 			});
 		}
 
+		if (cfg.videoGlow > 0) drawGlow(ctx, cfg, cam, pose, center, up, rot, w, h, fixedRotation != null);
+
 		RenderType type = cfg.worldSeeThrough ? RenderTypes.textSeeThrough(VideoTexture.ID) : RenderTypes.text(VideoTexture.ID);
 		float z = 0.002f; // just in front of the frame
 		// A later order is drawn after the frame and other text, so the picture ends up on top
@@ -213,6 +215,183 @@ public final class VideoWorld {
 	private static void solidVertex(VertexConsumer vc, PoseStack.Pose p, float x, float y, float z, float u, float v, float nz) {
 		vc.addVertex(p, x, y, z).setColor(0xFFFFFFFF).setUv(u, v).setOverlay(OverlayTexture.NO_OVERLAY)
 				.setLight(FULL_BRIGHT).setNormal(p, 0f, 0f, nz);
+	}
+
+	// ---------------------------------------------------------------- glow
+
+	/** The glow colour, eased toward the picture's average colour so it doesn't flicker. */
+	private static float glowR, glowG, glowB;
+	private static long glowAt;
+
+	/** Lit block faces around the screen, recomputed a few times a second (blocks rarely change). */
+	private record LitFace(Vec3[] corners, float[] light) {}
+
+	private static java.util.List<LitFace> litFaces = java.util.List.of();
+	private static long litFacesAt;
+	private static Vec3 litFacesFor;
+
+	/**
+	 * The screen lights up the blocks around it in the colours of the picture, like light
+	 * bouncing off them: every block face near the screen that faces it gets a soft coat of
+	 * light, brighter when it's close and turned toward the screen. Nothing glows in empty air,
+	 * and faces hidden behind other blocks stay dark. Drawn with additive blending.
+	 */
+	private static void drawGlow(LevelRenderContext ctx, HearNoDubConfig cfg, CameraRenderState cam, PoseStack pose,
+			Vec3 center, Vec3 up, Quaternionf rot, float w, float h, boolean tv) {
+		int avg = VideoCapture.get().averageColor();
+		long now = System.nanoTime();
+		float dt = glowAt == 0 ? 1f : Math.min(1f, (now - glowAt) / 1e9f);
+		glowAt = now;
+		float k = 1 - (float) Math.exp(-dt / 0.25f);
+		glowR += (((avg >> 16) & 255) - glowR) * k;
+		glowG += (((avg >> 8) & 255) - glowG) * k;
+		glowB += ((avg & 255) - glowB) * k;
+		// Most frames are fairly dark on average, so boost a lot
+		float strength = cfg.videoGlow / 100f * cfg.videoOpacity / 100f * 3.0f;
+		float r = glowR * strength / 255f, g = glowG * strength / 255f, b = glowB * strength / 255f;
+		if (r + g + b < 0.01f) return;
+
+		Vector3f backDir = rot.transform(new Vector3f(0, 0, 1));
+		Vec3 facing = new Vec3(backDir.x(), backDir.y(), backDir.z());
+		// Light comes from a point just in front of the screen (a TV only lights what's in front of it)
+		Vec3 light = tv ? center.add(facing.scale(0.4)) : center;
+		float reach = Math.max(w, h) * 0.9f + 3f;
+
+		long ms = System.currentTimeMillis();
+		if (litFacesFor == null || litFacesFor.distanceToSqr(light) > 0.04 || ms - litFacesAt > (tv ? 1000 : 150)) {
+			litFaces = findLitFaces(light, tv ? facing : null, reach);
+			litFacesAt = ms;
+			litFacesFor = light;
+		}
+		if (litFaces.isEmpty()) return;
+
+		java.util.List<LitFace> faces = litFaces;
+		SubmitNodeCollector out = ctx.submitNodeCollector();
+		// Without shaders, "lightning" is the vanilla way to add light on top of what's there
+		// (additive blending). "eyes" isn't additive in vanilla 26.3 (it painted the ground in
+		// flat colour, black for dark scenes) but shader packs light it nicely, so it's used then.
+		boolean shaders = shaderPackInUse();
+		RenderType type = shaders ? RenderTypes.eyes(dev.k3ytel.hearnodub.client.video.GlowTexture.get()) : RenderTypes.lightning();
+		pose.pushPose();
+		pose.setIdentity(); // world-space corners, relative to the camera
+		out.submitCustomGeometry(pose, type, (p, vc) -> {
+			for (LitFace f : faces) {
+				for (int i = 0; i < 4; i++) {
+					Vec3 c = f.corners()[i];
+					float l = f.light()[i];
+					int color = 0xFF000000 | channel(r * l) << 16 | channel(g * l) << 8 | channel(b * l);
+					// the middle of the glow texture is plain white
+					vc.addVertex(p, (float) (c.x - cam.pos.x), (float) (c.y - cam.pos.y), (float) (c.z - cam.pos.z))
+							.setColor(color).setUv(0.5f, 0.5f).setOverlay(OverlayTexture.NO_OVERLAY)
+							.setLight(FULL_BRIGHT).setNormal(p, 0f, 1f, 0f);
+				}
+			}
+		});
+		pose.popPose();
+	}
+
+	private static Boolean irisPresent;
+	private static java.lang.reflect.Method irisInstance, irisInUse;
+
+	/** True when Iris is installed and a shader pack is on (looked up by reflection: Iris is optional). */
+	private static boolean shaderPackInUse() {
+		if (irisPresent == null) {
+			irisPresent = false;
+			try {
+				Class<?> api = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
+				irisInstance = api.getMethod("getInstance");
+				irisInUse = api.getMethod("isShaderPackInUse");
+				irisPresent = true;
+			} catch (ReflectiveOperationException | LinkageError ignored) {
+			}
+		}
+		if (!irisPresent) return false;
+		try {
+			return (boolean) irisInUse.invoke(irisInstance.invoke(null));
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			irisPresent = false;
+			return false;
+		}
+	}
+
+	private static int channel(float v) {
+		return Math.max(0, Math.min(255, Math.round(v * 255)));
+	}
+
+	/**
+	 * Block faces within reach of the light that face it: solid on that side, with open space
+	 * in front, in front of the screen (for a TV), and with nothing solid between the face and
+	 * the light. Each corner gets its own brightness, so the light fades smoothly across faces.
+	 */
+	private static java.util.List<LitFace> findLitFaces(Vec3 light, Vec3 screenFacing, float reach) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null) return java.util.List.of();
+		var level = mc.level;
+		java.util.List<LitFace> out = new java.util.ArrayList<>();
+		int rr = (int) Math.ceil(reach);
+		net.minecraft.core.BlockPos origin = net.minecraft.core.BlockPos.containing(light);
+		net.minecraft.core.BlockPos.MutableBlockPos pos = new net.minecraft.core.BlockPos.MutableBlockPos();
+		for (int dx = -rr; dx <= rr; dx++) {
+			for (int dy = -rr; dy <= rr; dy++) {
+				for (int dz = -rr; dz <= rr; dz++) {
+					pos.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+					var state = level.getBlockState(pos);
+					if (state.isAir()) continue;
+					for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
+						Vec3 faceCenter = Vec3.atCenterOf(pos).add(d.getUnitVec3().scale(0.5));
+						Vec3 toLight = light.subtract(faceCenter);
+						double dist = toLight.length();
+						if (dist > reach || dist < 1e-3) continue;
+						Vec3 n = d.getUnitVec3();
+						if (n.dot(toLight) <= 0.05 * dist) continue; // facing away from the light
+						if (screenFacing != null && faceCenter.subtract(light).dot(screenFacing) < -0.6) continue; // behind the TV
+						if (!state.isFaceSturdy(level, pos, d)) continue;
+						net.minecraft.core.BlockPos front = pos.relative(d);
+						if (!level.getBlockState(front).getCollisionShape(level, front).isEmpty()) continue;
+						if (blocked(level, faceCenter.add(n.scale(0.05)), light)) continue;
+						out.add(face(pos, d, light, reach));
+						if (out.size() > 4000) return out;
+					}
+				}
+			}
+		}
+		return out;
+	}
+
+	/** True when a solid block sits between the two points (so the light can't reach). */
+	private static boolean blocked(net.minecraft.client.multiplayer.ClientLevel level, Vec3 from, Vec3 to) {
+		var hit = level.clip(new net.minecraft.world.level.ClipContext(from, to,
+				net.minecraft.world.level.ClipContext.Block.COLLIDER, net.minecraft.world.level.ClipContext.Fluid.NONE,
+				net.minecraft.world.phys.shapes.CollisionContext.empty()));
+		return hit.getType() != net.minecraft.world.phys.HitResult.Type.MISS
+				&& hit.getLocation().distanceToSqr(to) > 0.04;
+	}
+
+	/** The face's four corners (a hair off the block) with how much light reaches each. */
+	private static LitFace face(net.minecraft.core.BlockPos pos, net.minecraft.core.Direction d, Vec3 light, float reach) {
+		Vec3 n = d.getUnitVec3();
+		Vec3 c = Vec3.atCenterOf(pos).add(n.scale(0.5 + 0.004));
+		// two axes along the face, in an order that makes the quad face outward
+		Vec3 a, b;
+		switch (d) {
+			case UP -> { a = new Vec3(0, 0, 0.5); b = new Vec3(0.5, 0, 0); }
+			case DOWN -> { a = new Vec3(0.5, 0, 0); b = new Vec3(0, 0, 0.5); }
+			case NORTH -> { a = new Vec3(0, 0.5, 0); b = new Vec3(0.5, 0, 0); }
+			case SOUTH -> { a = new Vec3(0.5, 0, 0); b = new Vec3(0, 0.5, 0); }
+			case WEST -> { a = new Vec3(0, 0, 0.5); b = new Vec3(0, 0.5, 0); }
+			default -> { a = new Vec3(0, 0.5, 0); b = new Vec3(0, 0, 0.5); } // EAST
+		}
+		Vec3[] corners = {
+				c.subtract(a).subtract(b), c.add(a).subtract(b), c.add(a).add(b), c.subtract(a).add(b)};
+		float[] lit = new float[4];
+		for (int i = 0; i < 4; i++) {
+			Vec3 toLight = light.subtract(corners[i]);
+			double dist = toLight.length();
+			double falloff = Math.max(0, 1 - dist / reach);
+			double facingLight = dist < 1e-3 ? 1 : Math.max(0, n.dot(toLight) / dist);
+			lit[i] = (float) (falloff * falloff * (0.35 + 0.65 * facingLight));
+		}
+		return new LitFace(corners, lit);
 	}
 
 	// ---------------------------------------------------------------- floating

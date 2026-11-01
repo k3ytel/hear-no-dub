@@ -32,6 +32,7 @@ public static class HndVideo {
 	// written by the mod: 52 crop mode (0 auto, 1 manual, 2 whole window for the crop screen)
 	//                     56 manual x | 60 manual y | 64 manual w | 68 manual h (window pixels)
 	// 72 auto crop x | 76 y | 80 w | 84 h (what auto-detection found, for the crop screen)
+	// 88 average colour of the picture, 0xRRGGBB (for the TV glow)
 	// 96.. pixels, RGBA, top row first
 	public const int HEADER = 96;
 	public const int MAX_W = 2560, MAX_H = 1080;
@@ -150,6 +151,14 @@ public static class HndVideo {
 				int v = pixels[i];
 				pixels[i] = (int)(0xFF000000u | ((uint)v & 0x0000FF00u) | (((uint)v >> 16) & 0xFFu) | (((uint)v & 0xFFu) << 16));
 			}
+
+			// Average colour of the picture (for the TV glow), sampled every 7th pixel
+			long sr = 0, sg = 0, sb = 0, n = 0;
+			for (int i = 0; i < pixels.Length; i += 7) {
+				int v = pixels[i];
+				sr += v & 255; sg += (v >> 8) & 255; sb += (v >> 16) & 255; n++;
+			}
+			if (n > 0) Put(88, (int)((sr / n) << 16 | (sg / n) << 8 | (sb / n)));
 
 			Put(4, ++seq);            // odd: frame being written
 			Thread.MemoryBarrier();

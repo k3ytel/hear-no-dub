@@ -189,7 +189,7 @@ public final class SubText {
 		return root;
 	}
 
-	private static int colorFor(SubtitleTrack.Cue c, HearNoDubConfig cfg, int textColor) {
+	public static int colorFor(SubtitleTrack.Cue c, HearNoDubConfig cfg, int textColor) {
 		if (cfg.speakerColors && c.speaker() != null && !c.speaker().isBlank()) {
 			int h = c.speaker().trim().toLowerCase().hashCode();
 			return SPEAKER_PALETTE[Math.floorMod(h, SPEAKER_PALETTE.length)];

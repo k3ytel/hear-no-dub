@@ -17,6 +17,7 @@ import dev.isxander.yacl3.api.controller.TickBoxControllerBuilder;
 import dev.k3ytel.hearnodub.client.config.Animation;
 import dev.k3ytel.hearnodub.client.config.Billboard;
 import dev.k3ytel.hearnodub.client.config.BubbleTarget;
+import dev.k3ytel.hearnodub.client.config.DangerLevel;
 import dev.k3ytel.hearnodub.client.config.HearNoDubConfig;
 import dev.k3ytel.hearnodub.client.config.ScreenMode;
 import dev.k3ytel.hearnodub.client.config.StylePreset;
@@ -75,6 +76,19 @@ public final class HearNoDubConfigScreen {
 								0, 100, 5, v -> v + "%"))
 						.option(intSlider("width", def.maxLineWidth, () -> cfg.maxLineWidth, v -> cfg.maxLineWidth = v,
 								100, 800, 10, v -> v + " px"))
+						.build())
+				.group(OptionGroup.createBuilder()
+						.name(tr("group.danmaku"))
+						.description(OptionDescription.of(tr("group.danmaku.desc")))
+						.collapsed(true)
+						.option(intSlider("danmaku_seconds", def.danmakuSeconds, () -> cfg.danmakuSeconds, v -> cfg.danmakuSeconds = v,
+								3, 20, 1, v -> v + " s"))
+						.option(floatSlider("danmaku_scale", def.danmakuScale, () -> cfg.danmakuScale, v -> cfg.danmakuScale = v,
+								0.5f, 4f, 0.1f, "%.1f×"))
+						.option(intSlider("danmaku_area", def.danmakuArea, () -> cfg.danmakuArea, v -> cfg.danmakuArea = v,
+								15, 100, 5, v -> v + "%"))
+						.option(intSlider("danmaku_opacity", def.danmakuOpacity, () -> cfg.danmakuOpacity, v -> cfg.danmakuOpacity = v,
+								10, 100, 5, v -> v + "%"))
 						.build())
 				.group(OptionGroup.createBuilder()
 						.name(tr("group.world3d"))
@@ -220,6 +234,8 @@ public final class HearNoDubConfigScreen {
 				.group(OptionGroup.createBuilder()
 						.name(tr("group.video_world"))
 						.description(OptionDescription.of(tr("group.video_world.desc")))
+						.option(intSlider("video_glow", def.videoGlow, () -> cfg.videoGlow, v -> cfg.videoGlow = v,
+								0, 100, 5, v -> v == 0 ? "Off" : v + "%"))
 						.option(bool("video_subs_attach", def.videoSubsAttach, () -> cfg.videoSubsAttach, v -> cfg.videoSubsAttach = v))
 						.option(bool("video_distance_volume", def.videoDistanceVolume, () -> cfg.videoDistanceVolume,
 								v -> cfg.videoDistanceVolume = v))
@@ -237,6 +253,21 @@ public final class HearNoDubConfigScreen {
 				.option(intSlider("volume_step", def.volumeStep, () -> cfg.volumeStep, v -> cfg.volumeStep = v, 1, 25, 1,
 						v -> v + "%"))
 				.option(bool("media_popup", def.mediaPopup, () -> cfg.mediaPopup, v -> cfg.mediaPopup = v))
+				.group(OptionGroup.createBuilder()
+						.name(tr("group.danger"))
+						.description(OptionDescription.of(tr("group.danger.desc")))
+						.option(bool("danger_pause", def.dangerPause, () -> cfg.dangerPause, v -> cfg.dangerPause = v))
+						.option(enumOption("danger_level", DangerLevel.class, def.dangerLevel, () -> cfg.dangerLevel,
+								v -> cfg.dangerLevel = v, DangerLevel::display))
+						.option(intSlider("danger_health", def.dangerHealthPercent, () -> cfg.dangerHealthPercent,
+								v -> cfg.dangerHealthPercent = v, 10, 90, 5, v -> v + "%"))
+						.option(intSlider("danger_burst", def.dangerBurstHearts, () -> cfg.dangerBurstHearts,
+								v -> cfg.dangerBurstHearts = v, 1, 10, 1, v -> v + (v == 1 ? " heart" : " hearts")))
+						.option(intSlider("danger_range", def.dangerRange, () -> cfg.dangerRange, v -> cfg.dangerRange = v,
+								4, 32, 1, v -> v + " blocks"))
+						.option(intSlider("danger_resume", def.dangerResumeSec, () -> cfg.dangerResumeSec,
+								v -> cfg.dangerResumeSec = v, 1, 30, 1, v -> v + " s"))
+						.build())
 				.group(OptionGroup.createBuilder()
 						.name(tr("group.skip"))
 						.description(OptionDescription.of(tr("group.skip.desc")))

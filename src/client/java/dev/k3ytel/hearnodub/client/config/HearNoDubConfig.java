@@ -53,6 +53,12 @@ public final class HearNoDubConfig {
 	public int backgroundOpacity = 50;
 	/** Max line width in GUI pixels (before scaling) before text wraps. */
 	public int maxLineWidth = 320;
+	/** Danmaku: seconds a line takes to cross the screen. */
+	public int danmakuSeconds = 8;
+	public float danmakuScale = 1.5f;
+	/** Danmaku: how much of the screen (from the top) the lanes use, in percent. */
+	public int danmakuArea = 60;
+	public int danmakuOpacity = 100;
 	/** Center of the caption box, as a fraction of the screen width. */
 	public float posX = 0.5f;
 	/** Bottom edge of the caption box, as a fraction of the screen height. */
@@ -100,6 +106,17 @@ public final class HearNoDubConfig {
 	// ---------------------------------------------------------------- video control
 	/** Pause the video when the Esc menu opens, resume when it closes. */
 	public boolean autoPause = true;
+	/** Pause the video when you're in danger, resume when safe. */
+	public boolean dangerPause = true;
+	public DangerLevel dangerLevel = DangerLevel.RELAXED;
+	/** Below this much health (percent), any damage counts as danger. */
+	public int dangerHealthPercent = 40;
+	/** Losing this many hearts within 3 seconds counts as danger. */
+	public int dangerBurstHearts = 4;
+	/** How close hostile mobs must be to count, in blocks. */
+	public int dangerRange = 12;
+	/** Seconds of safety before the video plays again. */
+	public int dangerResumeSec = 4;
 	/** How far the skip back / forward keys jump, in seconds. */
 	public int seekStepSec = 10;
 	/** How much one press of the volume keys changes the browser's volume, in percent. */
@@ -150,6 +167,8 @@ public final class HearNoDubConfig {
 	public float videoTvWidth = 3.0f;
 	/** When placing the TV on a wall, make it as big as the flat wall around it allows. */
 	public boolean videoTvFitWall = true;
+	/** Glow the screen's colours onto its surroundings, in percent (0 = off). */
+	public int videoGlow = 70;
 	/** Show 3D subtitles under the video screen (above it for a mob screen) instead of their own 3D mode. */
 	public boolean videoSubsAttach = true;
 	/** Lower the browser's volume the farther you are from the video screen. */
@@ -256,6 +275,15 @@ public final class HearNoDubConfig {
 		backgroundOpacity = Math.max(0, Math.min(100, backgroundOpacity));
 		maxLineWidth = Math.max(100, Math.min(800, maxLineWidth));
 		nudgeMs = Math.max(50, Math.min(2000, nudgeMs));
+		danmakuSeconds = Math.max(3, Math.min(20, danmakuSeconds == 0 ? 8 : danmakuSeconds));
+		danmakuScale = Math.max(0.5f, Math.min(4f, danmakuScale == 0 ? 1.5f : danmakuScale));
+		danmakuArea = Math.max(15, Math.min(100, danmakuArea == 0 ? 60 : danmakuArea));
+		danmakuOpacity = Math.max(10, Math.min(100, danmakuOpacity == 0 ? 100 : danmakuOpacity));
+		dangerRange = Math.max(4, Math.min(32, dangerRange == 0 ? 12 : dangerRange));
+		if (dangerLevel == null) dangerLevel = DangerLevel.RELAXED;
+		dangerHealthPercent = Math.max(10, Math.min(90, dangerHealthPercent == 0 ? 40 : dangerHealthPercent));
+		dangerBurstHearts = Math.max(1, Math.min(10, dangerBurstHearts == 0 ? 4 : dangerBurstHearts));
+		dangerResumeSec = Math.max(1, Math.min(30, dangerResumeSec == 0 ? 4 : dangerResumeSec));
 		seekStepSec = Math.max(1, Math.min(120, seekStepSec == 0 ? 10 : seekStepSec));
 		volumeStep = Math.max(1, Math.min(50, volumeStep == 0 ? 10 : volumeStep));
 		autoSkipDelaySec = Math.max(0, Math.min(10, autoSkipDelaySec));
@@ -275,6 +303,7 @@ public final class HearNoDubConfig {
 		videoFollowDelay = Math.max(0f, Math.min(3f, videoFollowDelay));
 		videoTvDistance = Math.max(1f, Math.min(16f, videoTvDistance == 0 ? 3f : videoTvDistance));
 		videoVolumeRange = Math.max(6, Math.min(96, videoVolumeRange == 0 ? 24 : videoVolumeRange));
+		videoGlow = Math.max(0, Math.min(100, videoGlow));
 		videoPosX = Math.max(0f, Math.min(1f, videoPosX));
 		videoPosY = Math.max(0f, Math.min(1f, videoPosY));
 		videoOpacity = Math.max(10, Math.min(100, videoOpacity == 0 ? 100 : videoOpacity));
