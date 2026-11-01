@@ -1,0 +1,235 @@
+package dev.k3ytel.hearnodub.client.media;
+
+import com.google.gson.Gson;
+import dev.k3ytel.hearnodub.client.HearNoDubClient;
+import dev.k3ytel.hearnodub.client.config.HearNoDubConfig;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * Runs the hidden PowerShell helper (bridge.ps1) and keeps the latest snapshot of
+ * what Windows' media controls report. Windows-only; on other systems it stays idle.
+ */
+public final class MediaBridge {
+	private static final MediaBridge INSTANCE = new MediaBridge();
+	private static final Gson GSON = new Gson();
+	private static final int MAX_RESTARTS = 5;
+
+	public enum Status { STARTING, RUNNING, UNSUPPORTED, FAILED }
+
+	/** One media session (one app that plays something), as reported by the bridge. */
+	public static final class Session {
+		public String app = "";
+		public String title = "";
+		public String artist = "";
+		public String album = "";
+		/** Position snapshot in ms, taken at {@link #updated} (unix ms). */
+		public long pos;
+		public long end;
+		public long updated;
+		public String status = "";
+
+		public boolean isPlaying() {
+			return "Playing".equalsIgnoreCase(status);
+		}
+
+		/** Current position: the snapshot plus the time since it was taken, while playing. */
+		public long livePositionMs(long nowMs) {
+			long p = pos;
+			if (isPlaying() && updated > 0) p += Math.max(0, nowMs - updated);
+			if (end > 0) p = Math.min(p, end);
+			return Math.max(0, p);
+		}
+
+		public boolean isMusicApp() {
+			String a = app == null ? "" : app.toLowerCase(Locale.ROOT);
+			return a.contains("spotify") || a.contains("zunemusic") || a.contains("applemusic")
+					|| a.contains("deezer") || a.contains("tidal");
+		}
+
+		/** Short readable name of the app ("Firefox", "Chrome", ...). */
+		public String appName() {
+			String a = app == null ? "" : app.toLowerCase(Locale.ROOT);
+			if (a.equals("308046b0af4a39cb") || a.contains("firefox")) return "Firefox";
+			if (a.contains("msedge") || a.contains("edge")) return "Edge";
+			if (a.contains("chrome")) return "Chrome";
+			if (a.contains("brave")) return "Brave";
+			if (a.contains("opera")) return "Opera";
+			if (a.contains("spotify")) return "Spotify";
+			if (a.contains("vlc")) return "VLC";
+			return app == null || app.isEmpty() ? "?" : app;
+		}
+	}
+
+	/** An open browser window and its active tab title. */
+	public static final class Window {
+		public String proc = "";
+		public String title = "";
+	}
+
+	public static final class Snapshot {
+		public List<Session> sessions = List.of();
+		public List<Window> windows = List.of();
+		public String error;
+	}
+
+	private volatile Snapshot latest = new Snapshot();
+	private volatile Status status = Status.STARTING;
+	private volatile String lastError = "";
+	private volatile boolean stopping = false;
+	private Process process;
+	private int restarts = 0;
+
+	private MediaBridge() {}
+
+	public static MediaBridge get() {
+		return INSTANCE;
+	}
+
+	public Snapshot latest() {
+		return latest;
+	}
+
+	public Status status() {
+		return status;
+	}
+
+	public String lastError() {
+		return lastError;
+	}
+
+	public void start() {
+		String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+		if (!os.contains("win")) {
+			status = Status.UNSUPPORTED;
+			HearNoDubClient.LOGGER.info("Not on Windows ({}); media detection is disabled", os);
+			return;
+		}
+		Thread t = new Thread(this::runLoop, "HearNoDub-MediaBridge");
+		t.setDaemon(true);
+		t.start();
+	}
+
+	public void stop() {
+		stopping = true;
+		Process p = process;
+		if (p != null) p.destroy();
+	}
+
+	private void runLoop() {
+		Path script;
+		try {
+			script = writeScript();
+		} catch (IOException e) {
+			fail("Could not write bridge script: " + e.getMessage());
+			return;
+		}
+
+		while (!stopping) {
+			try {
+				runOnce(script);
+			} catch (Exception e) {
+				HearNoDubClient.LOGGER.warn("Media bridge stopped", e);
+				lastError = e.getMessage() == null ? e.toString() : e.getMessage();
+			}
+			if (stopping) return;
+			latest = new Snapshot();
+			if (++restarts > MAX_RESTARTS) {
+				fail("Media bridge keeps crashing: " + lastError);
+				return;
+			}
+			status = Status.STARTING;
+			sleep(5000);
+		}
+	}
+
+	private void runOnce(Path script) throws IOException, InterruptedException {
+		ProcessBuilder pb = new ProcessBuilder(
+				"powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+				"-WindowStyle", "Hidden", "-File", script.toString(),
+				"-ParentPid", String.valueOf(ProcessHandle.current().pid()));
+		pb.redirectErrorStream(false);
+		process = pb.start();
+		drainStderr(process.getErrorStream());
+
+		try (BufferedReader reader = new BufferedReader(
+				new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+			String line;
+			while ((line = reader.readLine()) != null) {
+				line = line.trim();
+				if (line.startsWith("﻿")) line = line.substring(1);
+				if (!line.startsWith("{")) continue;
+				Snapshot snap;
+				try {
+					snap = GSON.fromJson(line, Snapshot.class);
+				} catch (Exception e) {
+					continue;
+				}
+				if (snap == null) continue;
+				if (snap.error != null) {
+					lastError = snap.error;
+					HearNoDubClient.LOGGER.warn("Media bridge error: {}", snap.error);
+					continue;
+				}
+				if (snap.sessions == null) snap.sessions = List.of();
+				if (snap.windows == null) snap.windows = List.of();
+				latest = snap;
+				if (status != Status.RUNNING) {
+					status = Status.RUNNING;
+					restarts = 0;
+					HearNoDubClient.LOGGER.info("Media bridge running");
+				}
+			}
+		}
+		process.waitFor();
+		HearNoDubClient.LOGGER.warn("Media bridge exited with code {}", process.exitValue());
+	}
+
+	private static void drainStderr(InputStream err) {
+		Thread t = new Thread(() -> {
+			try (BufferedReader r = new BufferedReader(new InputStreamReader(err, StandardCharsets.UTF_8))) {
+				String line;
+				while ((line = r.readLine()) != null) {
+					if (!line.isBlank()) HearNoDubClient.LOGGER.warn("[bridge] {}", line);
+				}
+			} catch (IOException ignored) {
+			}
+		}, "HearNoDub-BridgeErr");
+		t.setDaemon(true);
+		t.start();
+	}
+
+	/** Copies the bundled script to config/hear-no-dub/bridge.ps1 (overwritten every launch). */
+	private static Path writeScript() throws IOException {
+		Path target = HearNoDubConfig.DIR.resolve("bridge.ps1");
+		Files.createDirectories(target.getParent());
+		try (InputStream in = MediaBridge.class.getResourceAsStream("/hear-no-dub/bridge.ps1")) {
+			if (in == null) throw new IOException("bridge.ps1 missing from the mod jar");
+			Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+		}
+		return target;
+	}
+
+	private void fail(String msg) {
+		lastError = msg;
+		status = Status.FAILED;
+		HearNoDubClient.LOGGER.error(msg);
+	}
+
+	private static void sleep(long ms) {
+		try {
+			Thread.sleep(ms);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+	}
+}

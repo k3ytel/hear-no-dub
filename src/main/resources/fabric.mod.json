@@ -1,0 +1,36 @@
+{
+	"schemaVersion": 1,
+	"id": "hear-no-dub",
+	"version": "${version}",
+	"name": "Hear No Dub",
+	"description": "No dub? No problem. Shows synced subtitles on your HUD for the video playing in your browser, so you can watch subbed anime while you play. Detects what's playing through Windows' media controls and fetches English subtitles from OpenSubtitles.",
+	"authors": [
+		"k3ytel"
+	],
+	"contact": {
+		"homepage": "https://github.com/k3ytel/hear-no-dub",
+		"sources": "https://github.com/k3ytel/hear-no-dub",
+		"issues": "https://github.com/k3ytel/hear-no-dub/issues"
+	},
+	"license": "MIT",
+	"icon": "assets/hear-no-dub/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"dev.k3ytel.hearnodub.client.HearNoDubClient"
+		],
+		"modmenu": [
+			"dev.k3ytel.hearnodub.client.compat.ModMenuIntegration"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*",
+		"yet_another_config_lib_v3": ">=3.9.7"
+	},
+	"suggests": {
+		"modmenu": "*"
+	}
+}

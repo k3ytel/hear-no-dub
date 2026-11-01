@@ -1,0 +1,87 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+	id 'maven-publish'
+}
+
+repositories {
+	// YetAnotherConfigLib (YACL) - config screen library
+	maven {
+		name = "Xander Maven"
+		url = "https://maven.isxander.dev/releases"
+	}
+	// Mod Menu - optional, adds the "Config" button in the Mods list
+	maven {
+		name = "Terraformers"
+		url = "https://maven.terraformersmc.com/releases"
+	}
+	// Transitive dependencies of YACL (json5 parser)
+	maven {
+		name = "QuiltMC"
+		url = "https://maven.quiltmc.org/repository/release"
+	}
+}
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		"hear-no-dub" {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+}
+
+dependencies {
+	// To change the versions see the gradle.properties file
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+	// Fabric API
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// YACL (required at runtime)
+	implementation "dev.isxander:yet-another-config-lib:${project.yacl_version}"
+
+	// Mod Menu (optional at runtime; included here so it shows up in dev launches)
+	implementation "com.terraformersmc:modmenu:${project.modmenu_version}"
+}
+
+processResources {
+	def version = project.version
+	inputs.property "version", version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+}
+
+java {
+	withSourcesJar()
+
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+jar {
+	def projectName = project.name
+	inputs.property "projectName", projectName
+
+	from("LICENSE") {
+		rename { "${it}_$projectName"}
+	}
+}
+
+publishing {
+	publications {
+		create("mavenJava", MavenPublication) {
+			from components.java
+		}
+	}
+	repositories {
+	}
+}
