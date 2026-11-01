@@ -6,7 +6,25 @@ import java.util.List;
 
 /** A parsed subtitle file: cues sorted by start time, with fast lookup by time. */
 public final class SubtitleTrack {
-	public record Cue(long startMs, long endMs, String text) {}
+	/** A piece of text with its formatting. Newlines are kept inside the text. */
+	public record Span(String text, boolean italic, boolean bold) {}
+
+	/**
+	 * One subtitle line (may hold several text lines).
+	 *
+	 * @param text    plain text, lines separated by '\n'
+	 * @param speaker who's talking ("" when the file doesn't say)
+	 * @param spans   the same text split by formatting (italic/bold)
+	 */
+	public record Cue(long startMs, long endMs, String text, String speaker, List<Span> spans) {
+		public Cue(long startMs, long endMs, String text) {
+			this(startMs, endMs, text, "", List.of(new Span(text, false, false)));
+		}
+
+		public long durationMs() {
+			return Math.max(1, endMs - startMs);
+		}
+	}
 
 	private final List<Cue> cues;
 	/** Longest cue duration, so a lookup knows how far back an overlapping cue can start. */
@@ -27,6 +45,30 @@ public final class SubtitleTrack {
 
 	public boolean isEmpty() {
 		return cues.isEmpty();
+	}
+
+	/** The first cue starting after timeMs, or null. */
+	public Cue next(long timeMs) {
+		int lo = 0, hi = cues.size() - 1, ans = -1;
+		while (lo <= hi) {
+			int mid = (lo + hi) >>> 1;
+			if (cues.get(mid).startMs() > timeMs) {
+				ans = mid;
+				hi = mid - 1;
+			} else {
+				lo = mid + 1;
+			}
+		}
+		return ans < 0 ? null : cues.get(ans);
+	}
+
+	/** The last n cues that started at or before timeMs, oldest first. */
+	public List<Cue> recent(long timeMs, int n) {
+		List<Cue> out = new ArrayList<>();
+		for (int i = cues.size() - 1; i >= 0 && out.size() < n; i--) {
+			if (cues.get(i).startMs() <= timeMs) out.add(0, cues.get(i));
+		}
+		return out;
 	}
 
 	/** Cues starting between fromMs and toMs, in start order. */

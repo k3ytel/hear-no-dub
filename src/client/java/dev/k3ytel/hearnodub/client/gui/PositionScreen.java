@@ -1,5 +1,6 @@
 package dev.k3ytel.hearnodub.client.gui;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.k3ytel.hearnodub.client.config.HearNoDubConfig;
 import dev.k3ytel.hearnodub.client.hud.SubtitleHud;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -62,7 +63,7 @@ public class PositionScreen extends Screen {
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 		SubtitleHud.Box b = box();
-		if (event.button() == 0 && b != null && inside(b, event.x(), event.y())) {
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && b != null && inside(b, event.x(), event.y())) {
 			dragging = true;
 			grabDx = event.x() - b.x();
 			grabDy = event.y() - b.y();
@@ -89,7 +90,7 @@ public class PositionScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
-		if (dragging && event.button() == 0) {
+		if (dragging && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
 			dragging = false;
 			return true;
 		}

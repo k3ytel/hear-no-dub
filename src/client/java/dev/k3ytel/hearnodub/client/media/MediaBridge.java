@@ -119,6 +119,26 @@ public final class MediaBridge {
 		t.start();
 	}
 
+	/**
+	 * Asks the bridge to "toggle", "pause" or "play" the given app's media. Works through small
+	 * command files the bridge checks every 100 ms. Returns false when the bridge isn't running.
+	 */
+	public boolean sendCommand(String action, String app) {
+		if (status != Status.RUNNING || app == null || app.isEmpty()) return false;
+		try {
+			Path dir = HearNoDubConfig.DIR.resolve("cmd");
+			Files.createDirectories(dir);
+			String name = System.nanoTime() + "";
+			Path tmp = dir.resolve(name + ".tmp");
+			Files.writeString(tmp, action + " " + app, StandardCharsets.UTF_8);
+			Files.move(tmp, dir.resolve(name + ".cmd"), StandardCopyOption.ATOMIC_MOVE);
+			return true;
+		} catch (IOException e) {
+			HearNoDubClient.LOGGER.warn("Could not send '{}' to the media bridge", action, e);
+			return false;
+		}
+	}
+
 	public void stop() {
 		stopping = true;
 		Process p = process;
@@ -191,7 +211,7 @@ public final class MediaBridge {
 			}
 		}
 		process.waitFor();
-		HearNoDubClient.LOGGER.warn("Media bridge exited with code {}", process.exitValue());
+		if (!stopping) HearNoDubClient.LOGGER.warn("Media bridge exited with code {}", process.exitValue());
 	}
 
 	private static void drainStderr(InputStream err) {
@@ -215,6 +235,18 @@ public final class MediaBridge {
 		try (InputStream in = MediaBridge.class.getResourceAsStream("/hear-no-dub/bridge.ps1")) {
 			if (in == null) throw new IOException("bridge.ps1 missing from the mod jar");
 			Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+		}
+		// Old commands left over from a crash must not play/pause anything now
+		Path cmd = target.getParent().resolve("cmd");
+		if (Files.isDirectory(cmd)) {
+			try (var files = Files.list(cmd)) {
+				files.forEach(f -> {
+					try {
+						Files.deleteIfExists(f);
+					} catch (IOException ignored) {
+					}
+				});
+			}
 		}
 		return target;
 	}

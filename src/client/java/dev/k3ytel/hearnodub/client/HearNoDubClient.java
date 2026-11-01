@@ -3,7 +3,9 @@ package dev.k3ytel.hearnodub.client;
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.k3ytel.hearnodub.client.config.HearNoDubConfig;
 import dev.k3ytel.hearnodub.client.gui.SubtitlePickerScreen;
+import dev.k3ytel.hearnodub.client.hud.ScreenModes;
 import dev.k3ytel.hearnodub.client.hud.SubtitleHud;
+import dev.k3ytel.hearnodub.client.hud.WorldSubtitles;
 import dev.k3ytel.hearnodub.client.media.MediaBridge;
 import dev.k3ytel.hearnodub.client.subs.SubtitleManager;
 import net.fabricmc.api.ClientModInitializer;
@@ -15,6 +17,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
@@ -34,6 +37,13 @@ public class HearNoDubClient implements ClientModInitializer {
 	public static KeyMapping earlierKey;
 	public static KeyMapping laterKey;
 	public static KeyMapping pickerKey;
+	public static KeyMapping placeKey;
+	public static KeyMapping playPauseKey;
+	public static KeyMapping historyKey;
+
+	/** Auto-pause bookkeeping: was the Esc menu open last tick, and did we pause the video. */
+	private static boolean wasPauseMenu;
+	private static boolean pausedByUs;
 
 	@Override
 	public void onInitializeClient() {
@@ -45,9 +55,13 @@ public class HearNoDubClient implements ClientModInitializer {
 		earlierKey = register("earlier", InputConstants.KEY_LBRACKET);
 		laterKey = register("later", InputConstants.KEY_RBRACKET);
 		pickerKey = register("picker", InputConstants.KEY_K);
+		placeKey = register("place", InputConstants.UNKNOWN.getValue());
+		playPauseKey = register("play_pause", InputConstants.KEY_P);
+		historyKey = register("history", InputConstants.KEY_H);
 
 		// Drawn just below chat, so chat stays readable on top of the subtitles
 		HudElementRegistry.attachElementBefore(VanillaHudElements.CHAT, id("subtitles"), new SubtitleHud());
+		WorldSubtitles.register();
 
 		ClientTickEvents.END_CLIENT_TICK.register(HearNoDubClient::onEndTick);
 		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> MediaBridge.get().stop());
@@ -61,6 +75,21 @@ public class HearNoDubClient implements ClientModInitializer {
 	private static void onEndTick(Minecraft mc) {
 		SubtitleManager manager = SubtitleManager.get();
 		manager.tick(mc);
+		ScreenModes.tick(mc);
+		autoPause(mc, manager);
+
+		while (playPauseKey.consumeClick()) {
+			MediaBridge.Session s = manager.session();
+			if (s == null || !MediaBridge.get().sendCommand("toggle", s.app)) {
+				overlay(mc, Component.translatable("hear-no-dub.msg.nothing_playing").withStyle(ChatFormatting.GRAY));
+			} else {
+				pausedByUs = false; // you took over
+				overlay(mc, Component.translatable(s.isPlaying() ? "hear-no-dub.msg.pausing" : "hear-no-dub.msg.playing"));
+			}
+		}
+		while (historyKey.consumeClick()) {
+			manager.toggleHistory();
+		}
 
 		while (toggleKey.consumeClick()) {
 			HearNoDubConfig cfg = HearNoDubConfig.get();
@@ -77,11 +106,36 @@ public class HearNoDubClient implements ClientModInitializer {
 			manager.nudge(-HearNoDubConfig.get().nudgeMs);
 			overlay(mc, manager.offsetMessage());
 		}
+		while (placeKey.consumeClick()) {
+			WorldSubtitles.placeHere();
+			overlay(mc, Component.translatable("hear-no-dub.msg.placed"));
+		}
 		while (pickerKey.consumeClick()) {
 			if (mc.gui.screen() == null) {
 				mc.gui.setScreen(new SubtitlePickerScreen(null));
 			}
 		}
+	}
+
+	/**
+	 * Pauses the video when you open the Esc menu and resumes it when you close it, but only
+	 * if the mod paused it. Alt-tabbing (which also opens the menu) is ignored, since that's
+	 * usually you going to the video.
+	 */
+	private static void autoPause(Minecraft mc, SubtitleManager manager) {
+		boolean pauseMenu = mc.gui.screen() instanceof PauseScreen;
+		if (pauseMenu && !wasPauseMenu) {
+			MediaBridge.Session s = manager.session();
+			if (HearNoDubConfig.get().autoPause && mc.isWindowActive() && s != null && s.isPlaying()) {
+				pausedByUs = MediaBridge.get().sendCommand("pause", s.app);
+			}
+		} else if (mc.gui.screen() == null && pausedByUs) {
+			// back in the game (Options and other menus opened from the Esc menu don't count)
+			MediaBridge.Session s = manager.session();
+			if (s != null) MediaBridge.get().sendCommand("play", s.app);
+			pausedByUs = false;
+		}
+		wasPauseMenu = pauseMenu;
 	}
 
 	private static void overlay(Minecraft mc, Component msg) {

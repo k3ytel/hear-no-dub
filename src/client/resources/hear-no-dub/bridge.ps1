@@ -28,6 +28,30 @@ try {
 }
 
 $browsers = @('firefox', 'chrome', 'msedge', 'brave', 'opera', 'vivaldi')
+$cmdDir = Join-Path $PSScriptRoot 'cmd'
+
+# Commands from the mod: files "<id>.cmd" containing "toggle|pause|play <app id>"
+function Invoke-Commands {
+	if (-not (Test-Path $cmdDir)) { return }
+	foreach ($f in (Get-ChildItem -Path $cmdDir -Filter '*.cmd' -ErrorAction SilentlyContinue | Sort-Object Name)) {
+		try {
+			$line = (Get-Content -LiteralPath $f.FullName -Raw).Trim()
+			Remove-Item -LiteralPath $f.FullName -Force
+			$parts = $line -split ' ', 2
+			if ($parts.Count -lt 2) { continue }
+			foreach ($s in $mgr.GetSessions()) {
+				if ($s.SourceAppUserModelId -ne $parts[1]) { continue }
+				$op = $null
+				switch ($parts[0]) {
+					'toggle' { $op = $s.TryTogglePlayPauseAsync() }
+					'pause'  { $op = $s.TryPauseAsync() }
+					'play'   { $op = $s.TryPlayAsync() }
+				}
+				if ($op) { Await $op ([bool]) | Out-Null }
+			}
+		} catch {}
+	}
+}
 
 while ($true) {
 	if ($ParentPid -gt 0 -and -not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { exit 0 }
@@ -61,5 +85,8 @@ while ($true) {
 
 	Write-Output (ConvertTo-Json -Compress -Depth 4 -InputObject @{ sessions = $sessions; windows = $windows })
 	[Console]::Out.Flush()
-	Start-Sleep -Milliseconds 500
+	for ($k = 0; $k -lt 5; $k++) {
+		Invoke-Commands
+		Start-Sleep -Milliseconds 100
+	}
 }

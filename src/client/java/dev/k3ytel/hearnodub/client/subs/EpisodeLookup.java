@@ -89,7 +89,7 @@ public final class EpisodeLookup {
 		String url = BASE + "/singlesearch/shows?embed=episodes&q=" + URLEncoder.encode(query, StandardCharsets.UTF_8);
 		HttpResponse<String> resp = http.send(HttpRequest.newBuilder(URI.create(url))
 				.timeout(Duration.ofSeconds(15))
-				.header("User-Agent", "HearNoDub v0.1.0")
+				.header("User-Agent", Http.USER_AGENT)
 				.GET().build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 		if (resp.statusCode() == 404) return null;
 		if (resp.statusCode() != 200) throw new IOException("HTTP " + resp.statusCode());
@@ -145,6 +145,25 @@ public final class EpisodeLookup {
 		return bestScore >= 0.7 ? best : null;
 	}
 
+	/** 0..1 word-overlap similarity of two titles (ignores case, punctuation, one-letter typos). */
+	public static double similarity(String a, String b) {
+		if (a == null || b == null) return 0;
+		Set<String> wa = words(norm(a)), wb = words(norm(b));
+		// Compare against the shorter title's words so "Show S01E05 WEB" still matches "Show"
+		if (wa.size() > wb.size()) {
+			Set<String> t = wa;
+			wa = wb;
+			wb = t;
+		}
+		if (wa.isEmpty()) return 0;
+		int common = 0;
+		for (String w : wa) {
+			if (wb.contains(w)) common++;
+			else if (w.length() >= 4) for (String v : wb) if (v.length() >= 4 && withinOneEdit(w, v)) { common++; break; }
+		}
+		return common / (double) wa.size();
+	}
+
 	private static String norm(String s) {
 		return s.toLowerCase(Locale.ROOT)
 				.replace('’', '\'')
@@ -158,10 +177,44 @@ public final class EpisodeLookup {
 		return out;
 	}
 
+	/** Word overlap; words count as equal when they differ by one letter (romanization: Ryoumen/Ryomen). */
 	private static double dice(Set<String> a, Set<String> b) {
 		if (a.isEmpty() || b.isEmpty()) return 0;
 		int common = 0;
-		for (String w : a) if (b.contains(w)) common++;
+		for (String w : a) {
+			if (b.contains(w)) {
+				common++;
+				continue;
+			}
+			if (w.length() < 4) continue;
+			for (String v : b) {
+				if (v.length() >= 4 && withinOneEdit(w, v)) {
+					common++;
+					break;
+				}
+			}
+		}
 		return 2.0 * common / (a.size() + b.size());
+	}
+
+	private static boolean withinOneEdit(String a, String b) {
+		int la = a.length(), lb = b.length();
+		if (Math.abs(la - lb) > 1) return false;
+		int i = 0, j = 0, edits = 0;
+		while (i < la && j < lb) {
+			if (a.charAt(i) == b.charAt(j)) {
+				i++;
+				j++;
+				continue;
+			}
+			if (++edits > 1) return false;
+			if (la > lb) i++;
+			else if (lb > la) j++;
+			else {
+				i++;
+				j++;
+			}
+		}
+		return edits + (la - i) + (lb - j) <= 1;
 	}
 }

@@ -3,7 +3,7 @@
 	"id": "hear-no-dub",
 	"version": "${version}",
 	"name": "Hear No Dub",
-	"description": "No dub? No problem. Shows synced subtitles on your HUD for the video playing in your browser, so you can watch subbed anime while you play. Detects what's playing through Windows' media controls and fetches English subtitles from OpenSubtitles.",
+	"description": "No dub? No problem. Shows synced subtitles on your HUD for the video playing in your browser, so you can watch subbed anime while you play. Detects what's playing through Windows' media controls and fetches English subtitles from SubDL and OpenSubtitles (Jimaku optional). Subtitles can show on the HUD, action bar or chat, and in the world as floating text, pop-in lines or speech bubbles, with styles, karaoke and video play/pause.",
 	"authors": [
 		"k3ytel"
 	],

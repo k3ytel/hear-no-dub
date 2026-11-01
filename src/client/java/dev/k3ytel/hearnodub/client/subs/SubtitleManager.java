@@ -42,8 +42,8 @@ public final class SubtitleManager {
 	private static final Path CACHE_DIR = HearNoDubConfig.DIR.resolve("cache");
 	public static final Path LOCAL_DIR = HearNoDubConfig.DIR.resolve("subs");
 
-	/** A subtitle the user can pick: from OpenSubtitles, or a local file. */
-	public record Entry(String key, String label, String detail, OpenSubtitlesClient.Result remote, Path local) {}
+	/** A subtitle the user can pick: from an online source, or a local file. */
+	public record Entry(String key, String label, String detail, Candidate remote, Path local) {}
 
 	/** Saved per video: which subtitle was chosen. Plus saved sync offsets per subtitle. */
 	private static final class State {
@@ -56,6 +56,12 @@ public final class SubtitleManager {
 	private static final class Choice {
 		String key;
 		String label;
+		/** "os", "subdl", "jimaku"; null in files saved by v0.1.0 (= OpenSubtitles). */
+		String source;
+		String id;
+		String url;
+		int episode;
+		/** v0.1.0 OpenSubtitles file id. */
 		long fileId;
 		String localName;
 	}
@@ -65,7 +71,9 @@ public final class SubtitleManager {
 		t.setDaemon(true);
 		return t;
 	});
-	private final OpenSubtitlesClient client = new OpenSubtitlesClient();
+	private final OpenSubtitlesClient openSubtitles = new OpenSubtitlesClient();
+	private final SubDlClient subdl = new SubDlClient();
+	private final JimakuClient jimaku = new JimakuClient();
 	private final EpisodeLookup lookup = new EpisodeLookup();
 	private State state = new State();
 
@@ -86,6 +94,8 @@ public final class SubtitleManager {
 	private List<Entry> results = List.of();
 	private Component status = Component.empty();
 	private boolean busy;
+	/** Key of the subtitle currently being downloaded, so repeated clicks don't queue it again. */
+	private String loadingKey;
 
 	private SubtitleManager() {}
 
@@ -140,17 +150,14 @@ public final class SubtitleManager {
 
 		Choice saved = state.choices.get(videoKey);
 		if (saved != null) {
-			Entry entry = saved.localName != null
-					? new Entry(saved.key, saved.label, "", null, LOCAL_DIR.resolve(saved.localName))
-					: new Entry(saved.key, saved.label, "", remoteStub(saved), null);
-			load(mc, entry, Mode.SAVED);
+			load(mc, entryOf(saved), Mode.SAVED);
 			return;
 		}
 		if (!HearNoDubConfig.get().autoSearch) {
 			status = Component.translatable("hear-no-dub.status.idle");
 			return;
 		}
-		if (!HearNoDubConfig.get().hasApiKey()) {
+		if (!HearNoDubConfig.get().anySourceReady()) {
 			status = Component.translatable("hear-no-dub.status.no_key").withStyle(ChatFormatting.YELLOW);
 			if (!warnedNoKey) {
 				warnedNoKey = true;
@@ -161,13 +168,20 @@ public final class SubtitleManager {
 		search(mc, guess.query(), guess.season(), guess.episode(), true);
 	}
 
-	private static OpenSubtitlesClient.Result remoteStub(Choice c) {
-		return new OpenSubtitlesClient.Result(c.fileId, c.label, c.label, 0, c.label, 0, 0, false);
+	private static Entry entryOf(Choice c) {
+		if (c.localName != null) return new Entry(c.key, c.label, "", null, LOCAL_DIR.resolve(c.localName));
+		String source = c.source != null ? c.source : "os";
+		String id = c.id != null ? c.id : String.valueOf(c.fileId);
+		Candidate cand = new Candidate(source, id, c.label, "", 0, c.episode, 0, false, c.url == null ? "" : c.url);
+		return new Entry(cand.key(), c.label, "", cand, null);
 	}
 
 	// ================================================================ search & load
 
 	private enum Mode { AUTO, MANUAL, SAVED }
+
+	/** Videos at least this long are treated as movies. */
+	private static final long MOVIE_MS = 70 * 60 * 1000L;
 
 	/**
 	 * Finds subtitles. Steps: look the show up on TVmaze (IMDb ID + episode list), work out
@@ -176,7 +190,8 @@ public final class SubtitleManager {
 	 */
 	public void search(Minecraft mc, String query, int season, int episode, boolean autoPick) {
 		if (query == null || query.isBlank()) return;
-		if (!HearNoDubConfig.get().hasApiKey()) {
+		HearNoDubConfig cfg = HearNoDubConfig.get();
+		if (!cfg.anySourceReady()) {
 			status = Component.translatable("hear-no-dub.status.no_key").withStyle(ChatFormatting.YELLOW);
 			return;
 		}
@@ -185,10 +200,13 @@ public final class SubtitleManager {
 		String forVideo = videoKey;
 		String episodeTitle = session != null ? session.title : "";
 		String tab = guess != null ? guess.tabTitle() : "";
+		boolean useSubdl = cfg.subdlReady(), useOs = cfg.osReady(), useJimaku = cfg.jimakuReady();
+		// Over ~70 minutes it's a movie (sites often still call it "Episode 1")
+		boolean movie = session != null && session.end >= MOVIE_MS && season == 0;
 		worker.execute(() -> {
 			try {
-				int s = season, e = episode;
-				EpisodeLookup.Show show = lookup.findShow(query);
+				int s = movie ? 0 : season, e = movie ? 0 : episode;
+				EpisodeLookup.Show show = movie ? null : lookup.findShow(query);
 				if (show != null && s == 0 && e == 0) {
 					EpisodeLookup.Episode ep = EpisodeLookup.matchEpisode(show, episodeTitle);
 					if (ep != null) {
@@ -199,19 +217,59 @@ public final class SubtitleManager {
 							ep == null ? "none" : "S" + ep.season() + "E" + ep.number() + " '" + ep.name() + "'");
 				}
 				long imdb = show == null ? 0 : show.imdbNumber();
+				String imdbId = show == null ? null : show.imdbId();
 
-				List<OpenSubtitlesClient.Result> found = List.of();
-				if (imdb > 0) found = client.search(query, s, e, imdb);
-				if (found.isEmpty()) found = client.search(query, s, e, 0);
-				if (found.isEmpty() && (s > 0 || e > 0)) found = client.search(query, 0, 0, 0);
+				List<Candidate> found = new ArrayList<>();
+				List<String> counts = new ArrayList<>();
+				List<String> errors = new ArrayList<>();
+
+				if (useSubdl) {
+					try {
+						List<Candidate> r = List.of();
+						if (imdbId != null && !imdbId.isBlank()) r = subdl.search(query, imdbId, s, e, movie);
+						if (r.isEmpty()) r = subdl.search(query, null, s, e, movie);
+						if (r.isEmpty() && (s > 0 || e > 0)) r = subdl.search(query, imdbId, 0, 0, movie);
+						found.addAll(r);
+						counts.add("SubDL " + r.size());
+					} catch (Exception ex) {
+						HearNoDubClient.LOGGER.warn("SubDL search failed: {}", ex.toString());
+						errors.add("SubDL: " + message(ex));
+					}
+				}
+				if (useOs) {
+					try {
+						List<Candidate> r = List.of();
+						if (imdb > 0) r = openSubtitles.search(query, s, e, imdb);
+						if (r.isEmpty()) r = openSubtitles.search(query, s, e, 0);
+						if (r.isEmpty() && (s > 0 || e > 0)) r = openSubtitles.search(query, 0, 0, 0);
+						found.addAll(r);
+						counts.add("OpenSubtitles " + r.size());
+					} catch (Exception ex) {
+						HearNoDubClient.LOGGER.warn("OpenSubtitles search failed: {}", ex.toString());
+						errors.add("OpenSubtitles: " + message(ex));
+					}
+				}
+				if (useJimaku) {
+					try {
+						String name = show != null ? show.name() : query;
+						List<Candidate> r = jimaku.search(name, e);
+						found.addAll(r);
+						counts.add("Jimaku " + r.size());
+					} catch (Exception ex) {
+						HearNoDubClient.LOGGER.warn("Jimaku search failed: {}", ex.toString());
+						errors.add("Jimaku: " + message(ex));
+					}
+				}
 
 				final int fs = s, fe = e;
-				List<OpenSubtitlesClient.Result> sorted = new ArrayList<>(found);
-				sorted.sort(Comparator.comparingInt((OpenSubtitlesClient.Result r) -> score(r, fs, fe)).reversed());
+				final boolean knownShow = imdbId != null && !imdbId.isBlank();
+				List<Candidate> sorted = new ArrayList<>(found);
+				sorted.sort(Comparator.comparingInt((Candidate c) -> score(c, fs, fe)).reversed());
 				List<Entry> entries = new ArrayList<>();
-				for (OpenSubtitlesClient.Result r : sorted) entries.add(entryOf(r));
-				HearNoDubClient.LOGGER.info("Search '{}' S{}E{} imdb={} -> {} results{}", query, fs, fe, imdb, entries.size(),
-						sorted.isEmpty() ? "" : ", best: " + sorted.getFirst().label());
+				for (Candidate c : sorted) entries.add(entryOf(c));
+				HearNoDubClient.LOGGER.info("Search '{}' S{}E{} imdb={} -> {} results ({}){}{}", query, fs, fe, imdbId, entries.size(),
+						String.join(", ", counts), errors.isEmpty() ? "" : " errors: " + errors,
+						sorted.isEmpty() ? "" : ", best: [" + sorted.getFirst().sourceName() + "] " + sorted.getFirst().label());
 
 				mc.execute(() -> {
 					busy = false;
@@ -219,14 +277,22 @@ public final class SubtitleManager {
 					results = entries;
 					if (autoPick) guess = new TitleGuesser.Guess(query, fs, fe, tab);
 					if (entries.isEmpty()) {
-						status = Component.translatable("hear-no-dub.status.none", query).withStyle(ChatFormatting.YELLOW);
+						status = errors.isEmpty()
+								? Component.translatable("hear-no-dub.status.none", query).withStyle(ChatFormatting.YELLOW)
+								: Component.translatable("hear-no-dub.status.error", String.join(" · ", errors)).withStyle(ChatFormatting.RED);
 						if (autoPick) toast(mc, Component.translatable("hear-no-dub.toast.none", query));
 						return;
 					}
-					status = Component.translatable("hear-no-dub.status.found", entries.size());
+					String summary = String.join(" · ", counts) + (errors.isEmpty() ? "" : " · " + String.join(" · ", errors));
+					status = Component.translatable("hear-no-dub.status.found_from", entries.size(), summary);
 					if (!autoPick) return;
-					OpenSubtitlesClient.Result best = sorted.getFirst();
-					boolean sure = fe > 0 && best.episode() == fe && (fs == 0 || best.season() == 0 || best.season() == fs);
+					Candidate best = sorted.getFirst();
+					// Without an exact show match (IMDb), the result's title must look like the show
+					boolean titleOk = knownShow || EpisodeLookup.similarity(best.title().isBlank() ? best.label() : best.title(), query) >= 0.6
+							|| EpisodeLookup.similarity(best.label(), query) >= 0.6;
+					boolean sure = movie
+							? titleOk
+							: titleOk && fe > 0 && best.episode() == fe && (fs == 0 || best.season() == 0 || best.season() == fs);
 					if (sure) {
 						load(mc, entries.getFirst(), Mode.AUTO);
 					} else {
@@ -245,14 +311,17 @@ public final class SubtitleManager {
 		});
 	}
 
-	private static int score(OpenSubtitlesClient.Result r, int season, int episode) {
+	private static int score(Candidate c, int season, int episode) {
 		int s = 0;
-		if (episode > 0 && r.episode() == episode) s += 1000;
-		if (episode > 0 && r.episode() > 0 && r.episode() != episode) s -= 2000;
-		if (season > 0 && r.season() == season) s += 300;
-		if (r.hearingImpaired()) s -= 50;
-		if (isStreamingRip(r)) s += 400;
-		s += Math.min(r.downloads(), 200_000) / 1000;
+		if (episode > 0 && c.episode() == episode) s += 1000;
+		if (episode > 0 && c.episode() > 0 && c.episode() != episode) s -= 2000;
+		if (season > 0 && c.season() == season) s += 300;
+		if (season > 0 && c.season() > 0 && c.season() != season) s -= 500;
+		if (c.hearingImpaired()) s -= 50;
+		if (isStreamingRip(c)) s += 400;
+		// SubDL first: its daily limits are far higher, so OpenSubtitles downloads are saved for when it's needed
+		if (c.source().equals("subdl")) s += 150;
+		s += Math.min(c.downloads(), 200_000) / 1000;
 		return s;
 	}
 
@@ -261,22 +330,22 @@ public final class SubtitleManager {
 			"subsplease|horriblesubs|erai|crunchyroll|\\bcr\\b|amzn|\\bnf\\b|netflix|hidive|web[-. ]?dl|web[-. ]?rip|\\bweb\\b",
 			java.util.regex.Pattern.CASE_INSENSITIVE);
 
-	private static boolean isStreamingRip(OpenSubtitlesClient.Result r) {
-		return STREAM_RIP.matcher(r.label()).find() || (r.fileName() != null && STREAM_RIP.matcher(r.fileName()).find());
+	private static boolean isStreamingRip(Candidate c) {
+		return STREAM_RIP.matcher(c.label()).find();
 	}
 
-	private static Entry entryOf(OpenSubtitlesClient.Result r) {
-		StringBuilder detail = new StringBuilder();
-		if (!r.title().isBlank()) detail.append(r.title());
-		if (r.season() > 0 || r.episode() > 0) {
+	private static Entry entryOf(Candidate c) {
+		StringBuilder detail = new StringBuilder("[").append(c.sourceName()).append("]");
+		if (!c.title().isBlank()) detail.append("  ").append(c.title());
+		if (c.season() > 0 || c.episode() > 0) {
 			detail.append("  ");
-			if (r.season() > 0) detail.append('S').append(r.season());
-			if (r.episode() > 0) detail.append('E').append(r.episode());
+			if (c.season() > 0) detail.append('S').append(c.season());
+			if (c.episode() > 0) detail.append('E').append(c.episode());
 		}
-		detail.append("  ↓").append(r.downloads());
-		if (r.hearingImpaired()) detail.append("  [HI]");
-		if (isStreamingRip(r)) detail.append("  [stream timing]");
-		return new Entry("os:" + r.fileId(), r.label(), detail.toString(), r, null);
+		if (c.downloads() > 0) detail.append("  \u2193").append(c.downloads());
+		if (c.hearingImpaired()) detail.append("  [HI]");
+		if (isStreamingRip(c)) detail.append("  [stream timing]");
+		return new Entry(c.key(), c.label(), detail.toString(), c, null);
 	}
 
 	/** Local .srt/.ass/.ssa/.vtt files in config/hear-no-dub/subs. */
@@ -313,29 +382,23 @@ public final class SubtitleManager {
 	}
 
 	private void load(Minecraft mc, Entry entry, Mode mode) {
+		if (entry.key().equals(loadingKey)) return; // already downloading this one
 		HearNoDubClient.LOGGER.info("Loading subtitles ({}): {} [{}]", mode, entry.label(), entry.key());
 		busy = true;
+		loadingKey = entry.key();
 		status = Component.translatable("hear-no-dub.status.loading", entry.label()).withStyle(ChatFormatting.GRAY);
 		String forVideo = videoKey;
+		int episode = guess != null ? guess.episode() : 0;
 		worker.execute(() -> {
 			try {
-				String text;
-				if (entry.local() != null) {
-					text = Files.readString(entry.local(), StandardCharsets.UTF_8);
-				} else {
-					Path cached = CACHE_DIR.resolve(entry.remote().fileId() + ".srt");
-					if (Files.exists(cached)) {
-						text = Files.readString(cached, StandardCharsets.UTF_8);
-					} else {
-						text = client.download(entry.remote().fileId());
-						Files.createDirectories(CACHE_DIR);
-						Files.writeString(cached, text, StandardCharsets.UTF_8);
-					}
-				}
+				String text = entry.local() != null
+						? Http.decode(Files.readAllBytes(entry.local()))
+						: fetch(entry.remote(), episode);
 				SubtitleTrack parsed = SubtitleParser.parse(text);
 				HearNoDubClient.LOGGER.info("Parsed {} lines from {}", parsed.size(), entry.key());
 				mc.execute(() -> {
 					busy = false;
+					loadingKey = null;
 					if (parsed.isEmpty()) {
 						status = Component.translatable("hear-no-dub.status.empty", entry.label()).withStyle(ChatFormatting.RED);
 						return;
@@ -344,8 +407,14 @@ public final class SubtitleManager {
 						Choice c = new Choice();
 						c.key = entry.key();
 						c.label = entry.label();
-						if (entry.local() != null) c.localName = entry.local().getFileName().toString();
-						else c.fileId = entry.remote().fileId();
+						if (entry.local() != null) {
+							c.localName = entry.local().getFileName().toString();
+						} else {
+							c.source = entry.remote().source();
+							c.id = entry.remote().id();
+							c.url = entry.remote().url();
+							c.episode = episode > 0 ? episode : entry.remote().episode();
+						}
 						state.choices.put(forVideo, c);
 						saveState();
 					}
@@ -369,16 +438,48 @@ public final class SubtitleManager {
 					} else if (mode == Mode.SAVED) {
 						toast(mc, Component.translatable("hear-no-dub.toast.saved", shortLabel()));
 					}
+					int left = openSubtitles.remaining();
+					if (entry.remote() != null && entry.remote().source().equals("os") && left >= 0 && left <= 3) {
+						toast(mc, Component.translatable("hear-no-dub.toast.quota_low", left));
+					}
 				});
 			} catch (Throwable t) {
 				HearNoDubClient.LOGGER.warn("Loading subtitles failed", t);
 				mc.execute(() -> {
 					busy = false;
+					loadingKey = null;
 					status = Component.translatable("hear-no-dub.status.error", message(t)).withStyle(ChatFormatting.RED);
 					if (mode != Mode.MANUAL) toast(mc, Component.translatable("hear-no-dub.toast.error", message(t)));
 				});
 			}
 		});
+	}
+
+	/** Cached copy if there is one, otherwise a download from the candidate's source (then cached). */
+	private String fetch(Candidate c, int episode) throws IOException, InterruptedException {
+		Path cached = CACHE_DIR.resolve(c.source() + "-" + c.id() + ".sub");
+		if (Files.exists(cached)) return Files.readString(cached, StandardCharsets.UTF_8);
+		if (c.source().equals("os")) {
+			Path legacy = CACHE_DIR.resolve(c.id() + ".srt"); // v0.1.0 cache name
+			if (Files.exists(legacy)) return Files.readString(legacy, StandardCharsets.UTF_8);
+		}
+		String text = switch (c.source()) {
+			case "os" -> openSubtitles.download(c);
+			case "subdl" -> subdl.download(c, episode);
+			case "jimaku" -> jimaku.download(c, episode);
+			default -> throw new IOException("Unknown source " + c.source());
+		};
+		Files.createDirectories(CACHE_DIR);
+		Files.writeString(cached, text, StandardCharsets.UTF_8);
+		return text;
+	}
+
+	/** "OpenSubtitles: N downloads left today", or null when unknown. */
+	public Component quotaText() {
+		int left = openSubtitles.remaining();
+		if (left < 0) return null;
+		return Component.translatable("hear-no-dub.picker.quota", left)
+				.withStyle(left <= 3 ? ChatFormatting.YELLOW : ChatFormatting.DARK_GRAY);
 	}
 
 	private String shortLabel() {
@@ -478,6 +579,34 @@ public final class SubtitleManager {
 		MediaBridge.Session s = session;
 		if (t == null || s == null) return List.of();
 		return t.activeAt(s.livePositionMs(System.currentTimeMillis()) + shiftMs);
+	}
+
+	/** The next line after the current time (for the preview), or null. */
+	public SubtitleTrack.Cue nextCue() {
+		SubtitleTrack t = track;
+		long now = subtitleTimeMs();
+		if (t == null || now < 0) return null;
+		return t.next(now);
+	}
+
+	/** The last n lines that have started (for "what did they say?"). */
+	public List<SubtitleTrack.Cue> recentCues(int n) {
+		SubtitleTrack t = track;
+		long now = subtitleTimeMs();
+		if (t == null || now < 0) return List.of();
+		return t.recent(now, n);
+	}
+
+	private static final long HISTORY_MS = 7000;
+	private long historyUntil;
+
+	/** Shows the history panel for a few seconds, or hides it if it's already up. */
+	public void toggleHistory() {
+		historyUntil = historyVisible() ? 0 : System.currentTimeMillis() + HISTORY_MS;
+	}
+
+	public boolean historyVisible() {
+		return System.currentTimeMillis() < historyUntil;
 	}
 
 	// ================================================================ getters for the picker

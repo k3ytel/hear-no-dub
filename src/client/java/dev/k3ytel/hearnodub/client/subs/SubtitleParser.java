@@ -9,15 +9,16 @@ import java.util.regex.Pattern;
 
 /**
  * Reads .srt, .vtt and .ass/.ssa subtitles into a {@link SubtitleTrack}.
- * Styling is stripped; for .ass, sign/typesetting lines are skipped so only dialogue shows.
+ * Italics and bold are kept; other styling is dropped. For .ass, sign/typesetting lines
+ * are skipped so only dialogue shows, and the "Name" field becomes the speaker.
  */
 public final class SubtitleParser {
 	private SubtitleParser() {}
 
 	private static final Pattern SRT_TIME = Pattern.compile(
 			"(?:(\\d+):)?(\\d{1,2}):(\\d{2})[,.](\\d{1,3})\\s*-->\\s*(?:(\\d+):)?(\\d{1,2}):(\\d{2})[,.](\\d{1,3})");
-	private static final Pattern HTML_TAG = Pattern.compile("<[^>]*>");
-	private static final Pattern ASS_TAG = Pattern.compile("\\{[^}]*}");
+	/** "ASTA: Let's go!" style speaker labels in SRT (common in hearing-impaired subs). */
+	private static final Pattern SRT_SPEAKER = Pattern.compile("^([A-Z][A-Z .'-]{1,20}):\\s");
 
 	public static SubtitleTrack parse(String content) {
 		if (content.startsWith("﻿")) content = content.substring(1);
@@ -51,8 +52,12 @@ public final class SubtitleParser {
 				text.append(lines[i].trim());
 				i++;
 			}
-			String clean = cleanText(text.toString());
-			if (!clean.isEmpty() && end > start) cues.add(new SubtitleTrack.Cue(start, end, clean));
+			List<SubtitleTrack.Span> spans = markup(text.toString());
+			String plain = plain(spans);
+			if (plain.isEmpty() || end <= start) continue;
+			Matcher sp = SRT_SPEAKER.matcher(plain);
+			String speaker = sp.find() ? sp.group(1).trim() : "";
+			cues.add(new SubtitleTrack.Cue(start, end, plain, speaker, spans));
 		}
 		return cues;
 	}
@@ -94,14 +99,17 @@ public final class SubtitleParser {
 			String start = field(parts, format, "start");
 			String end = field(parts, format, "end");
 			String style = field(parts, format, "style");
+			String name = field(parts, format, "name");
 			String text = field(parts, format, "text");
 			if (start == null || end == null || text == null) continue;
 			if (isSign(style, text)) continue;
 
-			String clean = cleanText(ASS_TAG.matcher(text).replaceAll("")
-					.replace("\\N", "\n").replace("\\n", "\n").replace("\\h", " "));
+			List<SubtitleTrack.Span> spans = markup(text.replace("\\N", "\n").replace("\\n", "\n").replace("\\h", " "));
+			String plain = plain(spans);
 			long s = assTime(start), e = assTime(end);
-			if (!clean.isEmpty() && s >= 0 && e > s) cues.add(new SubtitleTrack.Cue(s, e, clean));
+			if (!plain.isEmpty() && s >= 0 && e > s) {
+				cues.add(new SubtitleTrack.Cue(s, e, plain, name == null ? "" : name.trim(), spans));
+			}
 		}
 		return cues;
 	}
@@ -132,19 +140,139 @@ public final class SubtitleParser {
 		}
 	}
 
-	// ---------------------------------------------------------------- shared
+	// ---------------------------------------------------------------- markup
 
-	private static String cleanText(String text) {
-		String t = HTML_TAG.matcher(text).replaceAll("");
-		t = ASS_TAG.matcher(t).replaceAll("");
-		t = t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ");
-		StringBuilder out = new StringBuilder();
-		for (String line : t.split("\n")) {
-			String l = line.strip();
-			if (l.isEmpty()) continue;
-			if (!out.isEmpty()) out.append('\n');
-			out.append(l);
+	/**
+	 * Splits text into spans by &lt;i&gt;/&lt;b&gt; tags and {\i1}/{\b1} override blocks.
+	 * Every other tag or override is dropped. Lines are trimmed and empty lines removed.
+	 */
+	static List<SubtitleTrack.Span> markup(String raw) {
+		List<SubtitleTrack.Span> spans = new ArrayList<>();
+		StringBuilder cur = new StringBuilder();
+		boolean italic = false, bold = false;
+		int i = 0;
+		while (i < raw.length()) {
+			char c = raw.charAt(i);
+			if (c == '<') {
+				int close = raw.indexOf('>', i);
+				if (close > i) {
+					String tag = raw.substring(i + 1, close).trim().toLowerCase(Locale.ROOT);
+					boolean ni = italic, nb = bold;
+					if (tag.equals("i")) ni = true;
+					else if (tag.equals("/i")) ni = false;
+					else if (tag.equals("b")) nb = true;
+					else if (tag.equals("/b")) nb = false;
+					if (ni != italic || nb != bold) {
+						flush(spans, cur, italic, bold);
+						italic = ni;
+						bold = nb;
+					}
+					i = close + 1;
+					continue;
+				}
+			}
+			if (c == '{') {
+				int close = raw.indexOf('}', i);
+				if (close > i) {
+					String block = raw.substring(i + 1, close);
+					boolean ni = italic, nb = bold;
+					for (String o : block.split("\\\\")) {
+						if (o.equals("i1")) ni = true;
+						else if (o.equals("i0") || o.equals("i")) ni = false;
+						else if (o.equals("b1") || o.matches("b[5-9]00")) nb = true;
+						else if (o.equals("b0") || o.equals("b")) nb = false;
+						else if (o.equals("r")) {
+							ni = false;
+							nb = false;
+						}
+					}
+					if (ni != italic || nb != bold) {
+						flush(spans, cur, italic, bold);
+						italic = ni;
+						bold = nb;
+					}
+					i = close + 1;
+					continue;
+				}
+			}
+			cur.append(c);
+			i++;
 		}
-		return out.toString();
+		flush(spans, cur, italic, bold);
+		return tidy(spans);
+	}
+
+	private static void flush(List<SubtitleTrack.Span> spans, StringBuilder cur, boolean italic, boolean bold) {
+		if (cur.isEmpty()) return;
+		String t = cur.toString().replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ");
+		spans.add(new SubtitleTrack.Span(t, italic, bold));
+		cur.setLength(0);
+	}
+
+	/** Trims each text line and drops empty ones, keeping the formatting boundaries. */
+	private static List<SubtitleTrack.Span> tidy(List<SubtitleTrack.Span> spans) {
+		// Work on the joined text with a per-character style map
+		StringBuilder text = new StringBuilder();
+		List<int[]> styles = new ArrayList<>(); // {italic, bold} per char
+		for (SubtitleTrack.Span s : spans) {
+			for (int k = 0; k < s.text().length(); k++) {
+				text.append(s.text().charAt(k));
+				styles.add(new int[]{s.italic() ? 1 : 0, s.bold() ? 1 : 0});
+			}
+		}
+		StringBuilder outText = new StringBuilder();
+		List<int[]> outStyles = new ArrayList<>();
+		int lineStart = 0;
+		String all = text.toString();
+		while (lineStart <= all.length()) {
+			int nl = all.indexOf('\n', lineStart);
+			int lineEnd = nl < 0 ? all.length() : nl;
+			int a = lineStart, b = lineEnd;
+			while (a < b && Character.isWhitespace(all.charAt(a))) a++;
+			while (b > a && Character.isWhitespace(all.charAt(b - 1))) b--;
+			if (b > a) {
+				if (!outText.isEmpty()) {
+					outText.append('\n');
+					outStyles.add(new int[]{0, 0});
+				}
+				for (int k = a; k < b; k++) {
+					outText.append(all.charAt(k));
+					outStyles.add(styles.get(k));
+				}
+			}
+			if (nl < 0) break;
+			lineStart = nl + 1;
+		}
+		List<SubtitleTrack.Span> out = new ArrayList<>();
+		StringBuilder cur = new StringBuilder();
+		int ci = -1, cb = -1;
+		for (int k = 0; k < outText.length(); k++) {
+			char ch = outText.charAt(k);
+			if (ch == '\n') {
+				// line breaks get their own plain span
+				if (!cur.isEmpty()) out.add(new SubtitleTrack.Span(cur.toString(), ci == 1, cb == 1));
+				cur.setLength(0);
+				out.add(new SubtitleTrack.Span("\n", false, false));
+				continue;
+			}
+			int[] st = outStyles.get(k);
+			if (!cur.isEmpty() && (st[0] != ci || st[1] != cb)) {
+				out.add(new SubtitleTrack.Span(cur.toString(), ci == 1, cb == 1));
+				cur.setLength(0);
+			}
+			if (cur.isEmpty()) {
+				ci = st[0];
+				cb = st[1];
+			}
+			cur.append(ch);
+		}
+		if (!cur.isEmpty()) out.add(new SubtitleTrack.Span(cur.toString(), ci == 1, cb == 1));
+		return out;
+	}
+
+	static String plain(List<SubtitleTrack.Span> spans) {
+		StringBuilder sb = new StringBuilder();
+		for (SubtitleTrack.Span s : spans) sb.append(s.text());
+		return sb.toString();
 	}
 }

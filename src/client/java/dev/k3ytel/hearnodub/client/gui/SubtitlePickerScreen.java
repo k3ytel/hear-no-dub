@@ -97,7 +97,7 @@ public class SubtitlePickerScreen extends Screen {
 		listLeft = left;
 		listWidth = rowW;
 		listTop = y + 34;
-		int listBottom = height - 34;
+		int listBottom = height - 40;
 		visibleRows = Math.max(1, (listBottom - listTop) / ROW_H);
 
 		// Bottom buttons
@@ -178,6 +178,11 @@ public class SubtitlePickerScreen extends Screen {
 
 		if (view == View.RESULTS) drawResults(g, mouseX, mouseY);
 		else drawLines(g, mouseX, mouseY);
+
+		Component quota = manager.quotaText();
+		if (quota != null) {
+			g.text(font, quota, listLeft + listWidth - font.width(quota), height - 37, colorOf(quota));
+		}
 	}
 
 	private void drawNowPlaying(GuiGraphicsExtractor g) {
@@ -292,9 +297,9 @@ public class SubtitlePickerScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-		HearNoDubClient.LOGGER.info("Picker mouseClicked x={} y={} button={} (list x {}..{}, y from {})",
+		HearNoDubClient.LOGGER.debug("Picker mouseClicked x={} y={} button={} (list x {}..{}, y from {})",
 				(int) event.x(), (int) event.y(), event.button(), listLeft, listLeft + listWidth, listTop);
-		if (handleListClick(event.x(), event.y())) return true;
+		if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && handleListClick(event.x(), event.y())) return true;
 		return super.mouseClicked(event, doubleClick);
 	}
 
