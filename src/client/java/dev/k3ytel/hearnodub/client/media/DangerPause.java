@@ -54,9 +54,23 @@ public final class DangerPause {
 
 	public static void register() {
 		AttackEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
-			if (level.isClientSide()) lastAttackAt = System.currentTimeMillis();
+			if (level.isClientSide()) {
+				lastAttackAt = System.currentTimeMillis();
+				lastAttacked = entity;
+			}
 			return InteractionResult.PASS;
 		});
+	}
+
+	private static Entity lastAttacked;
+
+	/** The entity you hit last, if you hit it in the last 15 seconds and it's still around (the fight you're in). */
+	public static Entity fightTarget() {
+		Entity e = lastAttacked;
+		if (e == null || !e.isAlive() || System.currentTimeMillis() - lastAttackAt > 15_000) return null;
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.level == null || e.level() != mc.level) return null;
+		return e;
 	}
 
 	/** The snooze key: no danger pauses for 10 minutes, or back on if already snoozed. */

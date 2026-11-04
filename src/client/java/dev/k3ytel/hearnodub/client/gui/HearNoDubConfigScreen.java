@@ -63,6 +63,7 @@ public final class HearNoDubConfigScreen {
 		// ------------------------------------------------------------ Subtitles (where they show)
 		ConfigCategory subtitles = ConfigCategory.createBuilder()
 				.name(tr("category.subtitles"))
+				.option(button("studio", () -> new LyricsStudioScreen(create(parent))))
 				.option(enumOption("screen_mode", ScreenMode.class, def.screenMode, () -> cfg.screenMode, v -> cfg.screenMode = v,
 						ScreenMode::display))
 				.option(enumOption("world_mode", WorldMode.class, def.worldMode, () -> cfg.worldMode, v -> cfg.worldMode = v,
@@ -114,6 +115,58 @@ public final class HearNoDubConfigScreen {
 						.option(floatSlider("world_follow_delay", def.worldFollowDelay, () -> cfg.worldFollowDelay, v -> cfg.worldFollowDelay = v,
 								0f, 3f, 0.1f, "%.1f s"))
 						.option(bool("per_line_random", def.perLineRandom, () -> cfg.perLineRandom, v -> cfg.perLineRandom = v))
+						.build())
+				.group(OptionGroup.createBuilder()
+						.name(tr("group.lyrics_display"))
+						.description(OptionDescription.of(tr("group.lyrics_display.desc")))
+						.collapsed(true)
+						.option(enumOption("lyrics_view", dev.k3ytel.hearnodub.client.config.LyricsView.class, def.lyricsView, () -> cfg.lyricsView, v -> cfg.lyricsView = v, dev.k3ytel.hearnodub.client.config.LyricsView::display))
+						.option(enumOption("lyrics_reveal", dev.k3ytel.hearnodub.client.config.LyricsReveal.class, def.lyricsReveal, () -> cfg.lyricsReveal, v -> cfg.lyricsReveal = v, dev.k3ytel.hearnodub.client.config.LyricsReveal::display))
+						.option(enumOption("lyrics_effect", dev.k3ytel.hearnodub.client.config.LyricsEffect.class, def.lyricsEffect, () -> cfg.lyricsEffect, v -> cfg.lyricsEffect = v, dev.k3ytel.hearnodub.client.config.LyricsEffect::display))
+						.option(bool("lyrics_fill", def.lyricsFill, () -> cfg.lyricsFill, v -> cfg.lyricsFill = v))
+						.option(bool("lyrics_emphasis", def.lyricsEmphasis, () -> cfg.lyricsEmphasis, v -> cfg.lyricsEmphasis = v))
+						.option(bool("lyrics_upcoming", def.lyricsUpcoming, () -> cfg.lyricsUpcoming, v -> cfg.lyricsUpcoming = v))
+						.option(bool("lyrics_title_card", def.lyricsTitleCard, () -> cfg.lyricsTitleCard, v -> cfg.lyricsTitleCard = v))
+						.option(bool("lyrics_chorus", def.lyricsChorus, () -> cfg.lyricsChorus, v -> cfg.lyricsChorus = v))
+						.option(floatSlider("lyrics_scale", def.lyricsScale, () -> cfg.lyricsScale, v -> cfg.lyricsScale = v, 0.5f, 3f, 0.05f, "%.2f×"))
+						.option(intSlider("lyrics_dim", def.lyricsDimOpacity, () -> cfg.lyricsDimOpacity, v -> cfg.lyricsDimOpacity = v, 0, 100, 5, v -> v + "%"))
+						.option(color("lyrics_highlight", def.lyricsHighlightColor, () -> cfg.lyricsHighlightColor, v -> cfg.lyricsHighlightColor = v))
+						.build())
+				.group(OptionGroup.createBuilder()
+						.name(tr("group.popin3d"))
+						.description(OptionDescription.of(tr("group.popin3d.desc")))
+						.collapsed(true)
+						.option(enumOption("letter_style", dev.k3ytel.hearnodub.client.config.LetterStyle.class, def.letterStyle,
+								() -> cfg.letterStyle, v -> cfg.letterStyle = v, dev.k3ytel.hearnodub.client.config.LetterStyle::display))
+						.option(enumOption("letter_font", dev.k3ytel.hearnodub.client.config.LetterFont.class, def.letterFont,
+								() -> cfg.letterFont, v -> cfg.letterFont = v, dev.k3ytel.hearnodub.client.config.LetterFont::display))
+						.option(enumOption("letter_material", dev.k3ytel.hearnodub.client.config.LetterMaterial.class, def.letterMaterial, () -> cfg.letterMaterial, v -> cfg.letterMaterial = v, dev.k3ytel.hearnodub.client.config.LetterMaterial::display))
+						.option(enumOption("letter_spawn", dev.k3ytel.hearnodub.client.config.LetterSpawn.class, def.letterSpawn, () -> cfg.letterSpawn, v -> cfg.letterSpawn = v, dev.k3ytel.hearnodub.client.config.LetterSpawn::display))
+						.option(bool("letter_karaoke", def.letterKaraoke, () -> cfg.letterKaraoke, v -> cfg.letterKaraoke = v))
+						.option(bool("letter_audio_react", def.letterAudioReact, () -> cfg.letterAudioReact, v -> cfg.letterAudioReact = v))
+						.option(bool("letter_landing_fx", def.letterLandingFx, () -> cfg.letterLandingFx, v -> cfg.letterLandingFx = v))
+						.option(bool("letter_bands", def.letterBands, () -> cfg.letterBands, v -> cfg.letterBands = v))
+						.option(bool("letter_weather", def.letterWeather, () -> cfg.letterWeather, v -> cfg.letterWeather = v))
+						.option(bool("letter_director", def.letterDirector, () -> cfg.letterDirector, v -> cfg.letterDirector = v))
+						.option(bool("letter_mobs_look", def.letterMobsLook, () -> cfg.letterMobsLook, v -> cfg.letterMobsLook = v))
+						.option(intSlider("letter_sound_volume", def.letterSoundVolume, () -> cfg.letterSoundVolume, v -> cfg.letterSoundVolume = v, 0, 100, 5, v -> v + "%"))
+						.option(enumOption("letter_animation", dev.k3ytel.hearnodub.client.config.LetterAnimation.class, def.letterAnimation,
+								() -> cfg.letterAnimation, v -> cfg.letterAnimation = v, dev.k3ytel.hearnodub.client.config.LetterAnimation::display))
+						.option(floatSlider("letter_scale", def.letterScale, () -> cfg.letterScale, v -> cfg.letterScale = v,
+								0.3f, 3f, 0.05f, "%.2f×"))
+						.option(floatSlider("letter_min_distance", def.letterMinDistance, () -> cfg.letterMinDistance, v -> {
+									cfg.letterMinDistance = v;
+									if (cfg.letterDistance < v + 1) cfg.letterDistance = v + 1;
+								}, 2f, 32f, 0.5f, "%.1f blocks"))
+						.option(floatSlider("letter_distance", def.letterDistance, () -> cfg.letterDistance, v -> cfg.letterDistance = Math.max(v, cfg.letterMinDistance + 1),
+								3f, 64f, 0.5f, "%.1f blocks"))
+						.option(intSlider("letter_spread", def.letterSpread, () -> cfg.letterSpread, v -> cfg.letterSpread = v,
+								5, 60, 1, v -> v + "°"))
+						.option(bool("letter_shadow", def.letterShadow, () -> cfg.letterShadow, v -> cfg.letterShadow = v))
+						.option(bool("letter_glow", def.letterGlow, () -> cfg.letterGlow, v -> cfg.letterGlow = v))
+						.option(intSlider("letter_glow_strength", def.letterGlowStrength, () -> cfg.letterGlowStrength,
+								v -> cfg.letterGlowStrength = v, 5, 100, 5, v -> v + "%"))
+						.option(enumOption("glow_mode", dev.k3ytel.hearnodub.client.config.GlowMode.class, def.glowMode, () -> cfg.glowMode, v -> cfg.glowMode = v, dev.k3ytel.hearnodub.client.config.GlowMode::display))
 						.build())
 				.group(OptionGroup.createBuilder()
 						.name(tr("group.popin"))
@@ -297,6 +350,16 @@ public final class HearNoDubConfigScreen {
 						.option(text("api_key", () -> cfg.apiKey, v -> cfg.apiKey = v.trim()))
 						.option(text("username", () -> cfg.username, v -> cfg.username = v.trim()))
 						.option(text("password", () -> cfg.password, v -> cfg.password = v))
+						.build())
+				.group(OptionGroup.createBuilder()
+						.name(tr("group.lyrics"))
+						.description(OptionDescription.of(tr("group.lyrics.desc")))
+						.option(bool("use_betterlyrics", def.useBetterLyrics, () -> cfg.useBetterLyrics, v -> cfg.useBetterLyrics = v))
+						.option(bool("use_lrclib", def.useLrclib, () -> cfg.useLrclib, v -> cfg.useLrclib = v))
+						.option(bool("use_netease", def.useNetEase, () -> cfg.useNetEase, v -> cfg.useNetEase = v))
+						.option(bool("use_lyricsovh", def.useLyricsOvh, () -> cfg.useLyricsOvh, v -> cfg.useLyricsOvh = v))
+						.option(bool("lyrics_follow_music", def.lyricsFollowMusic, () -> cfg.lyricsFollowMusic, v -> cfg.lyricsFollowMusic = v))
+						.option(bool("lyrics_word_by_word", def.lyricsWordByWord, () -> cfg.lyricsWordByWord, v -> cfg.lyricsWordByWord = v))
 						.build())
 				.group(OptionGroup.createBuilder()
 						.name(tr("group.jimaku"))

@@ -33,6 +33,7 @@ import java.util.Random;
  * <ul>
  *   <li>FLOATING: in front of you (lazily follows your view) or fixed where you placed it</li>
  *   <li>POPIN: each line pops up at a random spot in your view and stays there relative to your camera</li>
+ *   <li>POPIN3D: lines land on blocks in view as 3D letters (see {@link PopIn3D})</li>
  *   <li>BUBBLE: above the mob you're looking at, or above your own head</li>
  * </ul>
  */
@@ -71,6 +72,7 @@ public final class WorldSubtitles {
 		// Subtitles attached to the video screen win over the normal 3D mode
 		VideoWorld.Attach att = cfg.videoSubsAttach && cfg.videoEnabled ? VideoWorld.attach() : null;
 		WorldMode mode = effectiveMode(mc, cfg);
+		if (mode != WorldMode.POPIN3D) PopIn3D.clear();
 		if (mode == WorldMode.NONE && att == null) return;
 		if (mc.gui.hud.isHidden()) return;
 
@@ -87,6 +89,10 @@ public final class WorldSubtitles {
 			// Text size follows the screen: about right for a 2.5-block screen at scale 1
 			float scale = cfg.worldScale * Math.max(0.5f, Math.min(4f, att.screenWidth() / 2.5f));
 			draw(ctx, mc.font, b, st, cfg, att.pos(), cam, scale, false, att.rotation(), att.above() ? 1 : 2);
+			return;
+		}
+		if (mode == WorldMode.POPIN3D) {
+			PopIn3D.render(ctx, mc, cfg, cam, cues);
 			return;
 		}
 		long groupKey = cues.isEmpty() ? Long.MIN_VALUE : cues.stream().mapToLong(SubtitleTrack.Cue::startMs).min().getAsLong();
@@ -107,7 +113,7 @@ public final class WorldSubtitles {
 					popKey = block.key();
 					pickSpot(cfg);
 				}
-				Vec3 dir = Vec3.directionFromRotation(cam.xRot + popPitch, cam.yRot + popYaw);
+				Vec3 dir = Vec3.directionFromRotation(camPitch(cam) + popPitch, camYaw(cam) + popYaw);
 				Vec3 pos = cam.pos.add(dir.scale(cfg.popinDistance));
 				draw(ctx, mc.font, block, style, cfg, pos, cam, cfg.popinScale, false);
 			}
@@ -243,7 +249,7 @@ public final class WorldSubtitles {
 	private static long anchorKey = Long.MIN_VALUE;
 
 	private static void updateAnchor(HearNoDubConfig cfg, ClientLevel level, CameraRenderState cam, long groupKey) {
-		Vec3 look = Vec3.directionFromRotation(cam.xRot, cam.yRot);
+		Vec3 look = cameraLook(cam);
 		Vec3 target = cam.pos.add(look.scale(cfg.worldDistance)).add(0, cfg.worldHeight, 0);
 
 		long now = System.nanoTime();
@@ -264,7 +270,7 @@ public final class WorldSubtitles {
 					anchorKey = groupKey;
 					if (cfg.perLineRandom) {
 						pickSpot(cfg);
-						Vec3 dir = Vec3.directionFromRotation(cam.xRot + popPitch, cam.yRot + popYaw);
+						Vec3 dir = Vec3.directionFromRotation(camPitch(cam) + popPitch, camYaw(cam) + popYaw);
 						anchor = cam.pos.add(dir.scale(cfg.worldDistance)).add(0, cfg.worldHeight, 0);
 					} else {
 						anchor = target;
@@ -313,9 +319,9 @@ public final class WorldSubtitles {
 	 * LOOKED_AT: picked when a line starts and kept for that whole line, so a glance away
 	 * doesn't move it. Without a mob in view, it's you talking.
 	 */
-	private static Entity bubbleTarget(Minecraft mc, HearNoDubConfig cfg, CameraRenderState cam, long key) {
+	static Entity bubbleTarget(Minecraft mc, HearNoDubConfig cfg, CameraRenderState cam, long key) {
 		if (cfg.bubbleTarget == BubbleTarget.SELF) return mc.player;
-		if (cfg.bubbleTarget == BubbleTarget.AUTO) {
+		if (cfg.bubbleTarget == BubbleTarget.AUTO || cfg.bubbleTarget == BubbleTarget.PLAYERS) {
 			Entity mob = lookedAtMob(mc, cfg, cam);
 			return mob != null ? mob : mc.player;
 		}
@@ -328,24 +334,58 @@ public final class WorldSubtitles {
 		return bubbleEntity;
 	}
 
-	/** The living entity closest to the centre of your view, within range and ~20°. */
+	/**
+	 * Who the lines go above: the one you're fighting first (hit in the last 15 s, players and
+	 * mobs), then whoever is under the crosshair, then the living entity closest to the centre
+	 * of your view. Other players count and win close calls (PvP). With "Players", only players.
+	 */
 	static Entity lookedAtMob(Minecraft mc, HearNoDubConfig cfg, CameraRenderState cam) {
-		if (mc.crosshairPickEntity instanceof LivingEntity le && le != mc.player && le.isAlive()) return le;
-		Vec3 look = Vec3.directionFromRotation(cam.xRot, cam.yRot);
-		double best = Math.cos(Math.toRadians(20));
-		Entity bestEntity = null;
+		boolean playersOnly = cfg.bubbleTarget == BubbleTarget.PLAYERS;
 		double range = cfg.bubbleRange;
+		Entity fight = dev.k3ytel.hearnodub.client.media.DangerPause.fightTarget();
+		if (fight instanceof LivingEntity && fight != mc.player && !fight.isInvisible()
+				&& (!playersOnly || fight instanceof net.minecraft.world.entity.player.Player)
+				&& fight.position().distanceTo(cam.pos) < range * 1.5) {
+			return fight;
+		}
+		if (mc.crosshairPickEntity instanceof LivingEntity le && le != mc.player && le.isAlive()
+				&& (!playersOnly || le instanceof net.minecraft.world.entity.player.Player)) return le;
+		Vec3 look = dev.k3ytel.hearnodub.client.hud.WorldSubtitles.cameraLook(cam);
+		double bestScore = -1;
+		Entity bestEntity = null;
 		for (Entity e : mc.level.entitiesForRendering()) {
 			if (!(e instanceof LivingEntity) || e == mc.player || !e.isAlive() || e.isInvisible()) continue;
+			boolean player = e instanceof net.minecraft.world.entity.player.Player;
+			if (playersOnly && !player) continue;
 			Vec3 to = e.getEyePosition(cam.cameraEntityPartialTicks).subtract(cam.pos);
 			double dist = to.length();
-			if (dist > range || dist < 0.5) continue;
+			if (dist > range * (player ? 1.5 : 1) || dist < 0.5) continue;
 			double dot = to.scale(1 / dist).dot(look);
-			if (dot > best) {
-				best = dot;
+			double cone = Math.cos(Math.toRadians(player ? (playersOnly ? 45 : 32) : 20));
+			if (dot < cone) continue;
+			double score = dot + (player ? 0.08 : 0);
+			if (score > bestScore) {
+				bestScore = score;
 				bestEntity = e;
 			}
 		}
 		return bestEntity;
 	}
+
+	static float camYaw(CameraRenderState cam) {
+		Vec3 d = cameraLook(cam);
+		return (float) Math.toDegrees(Math.atan2(-d.x, d.z));
+	}
+
+	static float camPitch(CameraRenderState cam) {
+		Vec3 d = cameraLook(cam);
+		return (float) Math.toDegrees(Math.asin(Math.max(-1, Math.min(1, -d.y))));
+	}
+
+	/** Where the camera looks (in third person that's not where the player looks). */
+	static Vec3 cameraLook(CameraRenderState cam) {
+		org.joml.Vector3f f = cam.orientation.transform(new org.joml.Vector3f(0, 0, -1));
+		return new Vec3(f.x, f.y, f.z).normalize();
+	}
+
 }

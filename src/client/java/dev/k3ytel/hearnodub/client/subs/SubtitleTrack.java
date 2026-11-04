@@ -15,10 +15,40 @@ public final class SubtitleTrack {
 	 * @param text    plain text, lines separated by '\n'
 	 * @param speaker who's talking ("" when the file doesn't say)
 	 * @param spans   the same text split by formatting (italic/bold)
+	 * @param words   when each word starts, in ms after startMs (one per whitespace-separated
+	 *                word of text), from word-synced lyrics; null when unknown
+	 * @param wordEnds when each word ends, in ms after startMs; null when unknown
 	 */
-	public record Cue(long startMs, long endMs, String text, String speaker, List<Span> spans) {
+	public record Cue(long startMs, long endMs, String text, String speaker, List<Span> spans, int[] words, int[] wordEnds) {
+		/** Speaker name used for background vocals / ad-libs in lyrics. */
+		public static final String BACKGROUND = "(bg)";
+
+		public Cue(long startMs, long endMs, String text, String speaker, List<Span> spans) {
+			this(startMs, endMs, text, speaker, spans, null, null);
+		}
+
+		public Cue(long startMs, long endMs, String text, String speaker, List<Span> spans, int[] words) {
+			this(startMs, endMs, text, speaker, spans, words, null);
+		}
+
 		public Cue(long startMs, long endMs, String text) {
 			this(startMs, endMs, text, "", List.of(new Span(text, false, false)));
+		}
+
+		public boolean hasWordTimes() {
+			return words != null && words.length > 0;
+		}
+
+		/** When word i stops being sung, in ms after startMs. */
+		public int wordEnd(int i) {
+			if (wordEnds != null && i < wordEnds.length) return wordEnds[i];
+			if (words != null && i + 1 < words.length) return words[i + 1];
+			return (int) durationMs();
+		}
+
+		/** Background vocals / ad-libs (from TTML lyrics). */
+		public boolean isBackground() {
+			return BACKGROUND.equals(speaker);
 		}
 
 		public long durationMs() {

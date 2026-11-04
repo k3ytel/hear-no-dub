@@ -24,6 +24,8 @@ public final class Http {
 	private Http() {}
 
 	public static final String USER_AGENT = "HearNoDub v0.5.0";
+	/** For services that ask apps to name themselves with a homepage (LRCLIB, Better Lyrics...). */
+	public static final String APP_AGENT = "HearNoDub/0.5.0 (https://github.com/k3ytel/hear-no-dub)";
 
 	public static final HttpClient CLIENT = HttpClient.newBuilder()
 			.connectTimeout(Duration.ofSeconds(10))
@@ -69,7 +71,7 @@ public final class Http {
 
 	public static boolean isSubtitleName(String name) {
 		String n = name.toLowerCase(Locale.ROOT);
-		return n.endsWith(".srt") || n.endsWith(".ass") || n.endsWith(".ssa") || n.endsWith(".vtt");
+		return n.endsWith(".srt") || n.endsWith(".ass") || n.endsWith(".ssa") || n.endsWith(".vtt") || n.endsWith(".lrc") || n.endsWith(".ttml");
 	}
 
 	/**

@@ -56,7 +56,7 @@ public final class SubtitleManager {
 	private static final class Choice {
 		String key;
 		String label;
-		/** "os", "subdl", "jimaku"; null in files saved by v0.1.0 (= OpenSubtitles). */
+		/** "os", "subdl", "jimaku", "lrclib"; null in files saved by v0.1.0 (= OpenSubtitles). */
 		String source;
 		String id;
 		String url;
@@ -74,6 +74,10 @@ public final class SubtitleManager {
 	private final OpenSubtitlesClient openSubtitles = new OpenSubtitlesClient();
 	private final SubDlClient subdl = new SubDlClient();
 	private final JimakuClient jimaku = new JimakuClient();
+	private final LrclibClient lrclib = new LrclibClient();
+	private final LyricsProviders.BetterLyrics betterLyrics = new LyricsProviders.BetterLyrics();
+	private final LyricsProviders.NetEase netEase = new LyricsProviders.NetEase();
+	private final LyricsProviders.LyricsOvh lyricsOvh = new LyricsProviders.LyricsOvh();
 	private final EpisodeLookup lookup = new EpisodeLookup();
 	private State state = new State();
 
@@ -126,7 +130,11 @@ public final class SubtitleManager {
 		}
 		// Music players never get picked automatically (switch to them in the picker if wanted)
 		List<MediaBridge.Session> videos = sessions.stream().filter(s -> !s.isMusicApp()).toList();
-		if (!videos.isEmpty()) sessions = videos;
+		HearNoDubConfig cfg = HearNoDubConfig.get();
+		boolean musicPlaying = sessions.stream().anyMatch(s -> s.isMusicApp() && s.isPlaying());
+		boolean videoPlaying = videos.stream().anyMatch(MediaBridge.Session::isPlaying);
+		boolean letMusicIn = cfg.lyricsReady() && cfg.lyricsFollowMusic && musicPlaying && !videoPlaying;
+		if (!videos.isEmpty() && !letMusicIn) sessions = videos;
 		if (session != null) {
 			for (MediaBridge.Session s : sessions) {
 				if (s.app.equals(session.app) && (s.isPlaying() || noneOtherPlaying(sessions, s))) return s;
@@ -149,9 +157,17 @@ public final class SubtitleManager {
 		HearNoDubClient.LOGGER.info("New video: app='{}' title='{}' artist='{}' album='{}' end={}ms tab='{}' -> guess '{}'",
 				s.app, s.title, s.artist, s.album, s.end, guess.tabTitle(), guess.describe());
 
+		boolean music = s.isMusicApp() && HearNoDubConfig.get().lyricsReady();
+		if (music) guess = new TitleGuesser.Guess(LrclibClient.cleanTitle(s.title), 0, 0, guess.tabTitle());
+
 		Choice saved = state.choices.get(videoKey);
 		if (saved != null) {
 			load(mc, entryOf(saved), Mode.SAVED);
+			return;
+		}
+		if (music) {
+			if (HearNoDubConfig.get().autoSearch) searchLyrics(mc, s.title, true);
+			else status = Component.translatable("hear-no-dub.status.idle");
 			return;
 		}
 		if (!HearNoDubConfig.get().autoSearch) {
@@ -192,6 +208,10 @@ public final class SubtitleManager {
 	public void search(Minecraft mc, String query, int season, int episode, boolean autoPick) {
 		if (query == null || query.isBlank()) return;
 		HearNoDubConfig cfg = HearNoDubConfig.get();
+		if (session != null && session.isMusicApp() && cfg.lyricsReady()) {
+			searchLyrics(mc, query, autoPick);
+			return;
+		}
 		if (!cfg.anySourceReady()) {
 			status = Component.translatable("hear-no-dub.status.no_key").withStyle(ChatFormatting.YELLOW);
 			return;
@@ -313,6 +333,119 @@ public final class SubtitleManager {
 		});
 	}
 
+	/**
+	 * Looks up song lyrics on LRCLIB for the music app's song. The title can be the session's
+	 * or one typed in the picker; artist, album and length come from the session.
+	 * With autoPick, the best match is loaded when its length matches the song.
+	 */
+	private void searchLyrics(Minecraft mc, String title, boolean autoPick) {
+		MediaBridge.Session s = session;
+		if (s == null) return;
+		busy = true;
+		String shown = LrclibClient.cleanTitle(title);
+		status = Component.translatable("hear-no-dub.status.searching_lyrics", shown).withStyle(ChatFormatting.GRAY);
+		String forVideo = videoKey;
+		// A typed title that isn't this song's: search without the session's album/length
+		boolean sameSong = LrclibClient.cleanTitle(s.title).equalsIgnoreCase(shown);
+		String artist = s.artist, album = sameSong ? s.album : null;
+		long length = sameSong ? s.end : 0;
+		HearNoDubConfig cfg = HearNoDubConfig.get();
+		boolean useBl = cfg.useBetterLyrics, useLrc = cfg.useLrclib, useNe = cfg.useNetEase, useOvh = cfg.useLyricsOvh;
+		worker.execute(() -> {
+			List<Candidate> found = new ArrayList<>();
+			List<String> counts = new ArrayList<>(), errors = new ArrayList<>();
+			// One source at a time (LRCLIB asks for no parallel requests); best sources first
+			lyricSource("Better Lyrics", useBl, found, counts, errors, () -> betterLyrics.search(title, artist, album, length));
+			lyricSource("LRCLIB", useLrc, found, counts, errors, () -> lrclib.search(title, artist, album, length));
+			lyricSource("NetEase", useNe, found, counts, errors, () -> netEase.search(title, artist, length));
+			// plain lyrics only matter when nothing synced turned up, or when searching by hand
+			boolean synced = found.stream().anyMatch(c -> LyricsProviders.rank(c) >= 2000);
+			lyricSource("lyrics.ovh", useOvh && (!synced || !autoPick), found, counts, errors, () -> lyricsOvh.search(title, artist));
+
+			List<Candidate> sorted = new ArrayList<>(found);
+			sorted.sort((x, y) -> Integer.compare(LyricsProviders.rank(y), LyricsProviders.rank(x)));
+			List<Entry> entries = new ArrayList<>();
+			for (Candidate c : sorted) entries.add(entryOf(c));
+			HearNoDubClient.LOGGER.info("Lyrics '{}' by '{}' -> {} ({}){}", shown, artist, entries.size(), String.join(", ", counts),
+					errors.isEmpty() ? "" : " errors: " + errors);
+			mc.execute(() -> {
+				busy = false;
+				if (!java.util.Objects.equals(forVideo, videoKey) && autoPick) return;
+				results = entries;
+				if (entries.isEmpty()) {
+					status = errors.isEmpty()
+							? Component.translatable("hear-no-dub.status.no_lyrics", shown).withStyle(ChatFormatting.YELLOW)
+							: Component.translatable("hear-no-dub.status.error", String.join(" · ", errors)).withStyle(ChatFormatting.RED);
+					if (autoPick) toast(mc, Component.translatable("hear-no-dub.toast.no_lyrics", shown));
+					return;
+				}
+				String summary = String.join(" · ", counts) + (errors.isEmpty() ? "" : " · " + String.join(" · ", errors));
+				status = Component.translatable("hear-no-dub.status.found_from", entries.size(), summary);
+				if (!autoPick) return;
+				Candidate best = sorted.getFirst();
+				if (LrclibClient.isInstrumental(best)) {
+					status = Component.translatable("hear-no-dub.status.instrumental", shown).withStyle(ChatFormatting.GRAY);
+					return;
+				}
+				if (LyricsProviders.confident(best) || (length <= 0 && sorted.size() == 1)) {
+					load(mc, entries.getFirst(), Mode.AUTO);
+					if (LyricsProviders.rank(best) < 2000) toast(mc, Component.translatable("hear-no-dub.toast.plain_lyrics", shown));
+				} else {
+					status = Component.translatable("hear-no-dub.status.lyrics_unsure").withStyle(ChatFormatting.YELLOW);
+					toast(mc, Component.translatable("hear-no-dub.toast.lyrics_unsure", keyName()));
+				}
+			});
+		});
+	}
+
+	private interface LyricSearch {
+		List<Candidate> run() throws Exception;
+	}
+
+	private static void lyricSource(String name, boolean enabled, List<Candidate> found, List<String> counts,
+			List<String> errors, LyricSearch search) {
+		if (!enabled) return;
+		try {
+			List<Candidate> r = search.run();
+			found.addAll(r);
+			counts.add(name + " " + r.size());
+		} catch (Throwable t) {
+			HearNoDubClient.LOGGER.warn("{} lyrics search failed: {}", name, t.toString());
+			errors.add(name + ": " + message(t));
+		}
+	}
+
+	// ---------------------------------------------------------------- demo song (Lyrics Studio)
+	private long demoStart = -1;
+
+	/** Plays the built-in demo song instead of the real subtitles (while the Lyrics Studio is open). */
+	public void setDemo(boolean on) {
+		demoStart = on ? System.currentTimeMillis() : -1;
+	}
+
+	public boolean demo() {
+		return demoStart >= 0;
+	}
+
+	/** Starts the demo song over. */
+	public void restartDemo() {
+		if (demoStart >= 0) demoStart = System.currentTimeMillis();
+	}
+
+	private long demoTime() {
+		return (System.currentTimeMillis() - demoStart) % DemoSong.LENGTH_MS;
+	}
+
+	/** True when the loaded track is song lyrics (shown with the lyrics display). */
+	public boolean isLyricsTrack() {
+		if (demoStart >= 0) return true;
+		if (track == null || trackKey == null) return false;
+		if (session != null && session.isMusicApp()) return true;
+		String k = trackKey.toLowerCase(Locale.ROOT);
+		return k.startsWith("lrclib:") || k.startsWith("betterlyrics:") || k.startsWith("netease:") || k.startsWith("lyricsovh:")
+				|| k.endsWith(".lrc") || k.endsWith(".ttml");
+	}
+
 	private static int score(Candidate c, int season, int episode) {
 		int s = 0;
 		if (episode > 0 && c.episode() == episode) s += 1000;
@@ -350,7 +483,7 @@ public final class SubtitleManager {
 		return new Entry(c.key(), c.label(), detail.toString(), c, null);
 	}
 
-	/** Local .srt/.ass/.ssa/.vtt files in config/hear-no-dub/subs. */
+	/** Local .srt/.ass/.ssa/.vtt/.lrc files in config/hear-no-dub/subs. */
 	public List<Entry> localEntries() {
 		List<Entry> out = new ArrayList<>();
 		try {
@@ -359,7 +492,7 @@ public final class SubtitleManager {
 				files.filter(Files::isRegularFile)
 						.filter(p -> {
 							String n = p.getFileName().toString().toLowerCase(Locale.ROOT);
-							return n.endsWith(".srt") || n.endsWith(".ass") || n.endsWith(".ssa") || n.endsWith(".vtt");
+							return Http.isSubtitleName(n);
 						})
 						.sorted()
 						.forEach(p -> out.add(new Entry("local:" + p.getFileName(), p.getFileName().toString(),
@@ -469,6 +602,10 @@ public final class SubtitleManager {
 			case "os" -> openSubtitles.download(c);
 			case "subdl" -> subdl.download(c, episode);
 			case "jimaku" -> jimaku.download(c, episode);
+			case "lrclib" -> lrclib.download(c, session != null ? session.end : 0);
+			case "betterlyrics" -> betterLyrics.download(c);
+			case "netease" -> netEase.download(c);
+			case "lyricsovh" -> lyricsOvh.download(c, session != null ? session.end : 0);
 			default -> throw new IOException("Unknown source " + c.source());
 		};
 		Files.createDirectories(CACHE_DIR);
@@ -563,6 +700,7 @@ public final class SubtitleManager {
 
 	/** Every line of the loaded subtitles (for searching), or empty. */
 	public List<SubtitleTrack.Cue> allCues() {
+		if (demoStart >= 0) return DemoSong.track().all();
 		SubtitleTrack t = track;
 		return t == null ? List.of() : t.all();
 	}
@@ -580,6 +718,7 @@ public final class SubtitleManager {
 
 	/** Current time in the subtitle file (video time + offset), or -1. */
 	public long subtitleTimeMs() {
+		if (demoStart >= 0) return demoTime();
 		MediaBridge.Session s = session;
 		if (track == null || s == null) return -1;
 		return s.livePositionMs(System.currentTimeMillis()) + shiftMs;
@@ -600,6 +739,7 @@ public final class SubtitleManager {
 
 	/** Cues to show right now (empty when nothing is loaded or playing). */
 	public List<SubtitleTrack.Cue> activeCues() {
+		if (demoStart >= 0) return DemoSong.track().activeAt(demoTime());
 		SubtitleTrack t = track;
 		MediaBridge.Session s = session;
 		if (t == null || s == null) return List.of();
@@ -608,6 +748,7 @@ public final class SubtitleManager {
 
 	/** The next line after the current time (for the preview), or null. */
 	public SubtitleTrack.Cue nextCue() {
+		if (demoStart >= 0) return DemoSong.track().next(demoTime());
 		SubtitleTrack t = track;
 		long now = subtitleTimeMs();
 		if (t == null || now < 0) return null;

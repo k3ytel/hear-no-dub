@@ -55,6 +55,7 @@ public class HearNoDubClient implements ClientModInitializer {
 	public static KeyMapping videoPlaceKey;
 	public static KeyMapping videoModeKey;
 	public static KeyMapping dangerSnoozeKey;
+	public static KeyMapping studioKey;
 	public static KeyMapping tvBiggerKey;
 	public static KeyMapping tvSmallerKey;
 
@@ -84,6 +85,7 @@ public class HearNoDubClient implements ClientModInitializer {
 		videoPlaceKey = register("video_place", InputConstants.KEY_B);
 		videoModeKey = register("video_mode", InputConstants.KEY_N);
 		dangerSnoozeKey = register("danger_snooze", InputConstants.KEY_U);
+		studioKey = register("studio", InputConstants.KEY_Y);
 		tvBiggerKey = register("tv_bigger", InputConstants.KEY_UP);
 		tvSmallerKey = register("tv_smaller", InputConstants.KEY_DOWN);
 
@@ -123,6 +125,8 @@ public class HearNoDubClient implements ClientModInitializer {
 		VideoCapture.get().tick();
 		dev.k3ytel.hearnodub.client.media.VolumeFade.tick(mc);
 		dev.k3ytel.hearnodub.client.media.DangerPause.tick(mc);
+		dev.k3ytel.hearnodub.client.media.AudioLevel.tick();
+		dev.k3ytel.hearnodub.client.hud.PopIn3D.tick(mc);
 		ScreenModes.tick(mc);
 		autoPause(mc, manager);
 
@@ -152,6 +156,9 @@ public class HearNoDubClient implements ClientModInitializer {
 		}
 		while (tvSmallerKey.consumeClick()) {
 			dev.k3ytel.hearnodub.client.video.TvScreen.resize(mc, 1 / 1.1f);
+		}
+		while (studioKey.consumeClick()) {
+			if (mc.gui.screen() == null) mc.gui.setScreen(new dev.k3ytel.hearnodub.client.gui.LyricsStudioScreen(null));
 		}
 		while (dangerSnoozeKey.consumeClick()) {
 			dev.k3ytel.hearnodub.client.media.DangerPause.toggleSnooze(mc);

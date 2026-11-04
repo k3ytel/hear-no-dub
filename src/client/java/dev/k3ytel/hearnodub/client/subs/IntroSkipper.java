@@ -96,7 +96,7 @@ public final class IntroSkipper {
 		resolvedFor = "";
 		current = null;
 		handled.clear();
-		if (!HearNoDubConfig.get().skipTimes || s == null || guess == null || guess.query().isBlank()) return;
+		if (!HearNoDubConfig.get().skipTimes || s == null || s.isMusicApp() || guess == null || guess.query().isBlank()) return;
 		if (s.end >= MOVIE_MS) {
 			info = Component.translatable("hear-no-dub.skip.info.movie");
 			return;

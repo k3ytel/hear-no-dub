@@ -35,12 +35,14 @@ public class SubtitleHud implements HudElement {
 
 		SubtitleManager m = SubtitleManager.get();
 		if (m.historyVisible()) drawHistory(g, mc.font, m);
+		LyricsHud.drawUpcoming(g, mc.font, m, cfg);
 
 		if (cfg.enabled && cfg.screenMode == ScreenMode.DANMAKU) {
 			Danmaku.draw(g, mc.font, m, cfg);
 			return;
 		}
 		if (!cfg.enabled || cfg.screenMode != ScreenMode.HUD) return;
+		if (LyricsHud.draw(g, mc.font, m, cfg)) return;
 		List<SubtitleTrack.Cue> cues = m.activeCues();
 		if (cues.isEmpty()) return;
 

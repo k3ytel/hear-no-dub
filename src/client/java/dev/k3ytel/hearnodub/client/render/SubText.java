@@ -129,6 +129,26 @@ public final class SubText {
 			long typeMs = Math.min((long) (c.durationMs() * 0.6), (long) total * TYPE_MS_PER_CHAR);
 			visible = typeMs <= 0 ? total : (int) Math.min(total, Math.ceil(total * (elapsed / (double) typeMs)));
 		}
+		if (c.hasWordTimes() && (cfg.karaoke || cfg.lyricsWordByWord)) {
+			// Word-synced lyrics: each word shows from the moment it's sung
+			int[] words = c.words();
+			int shown = 0;
+			while (shown < words.length && words[shown] <= elapsed) shown++;
+			int end = 0, word = 0;
+			boolean inWord = false;
+			for (int i = 0; i < total && word <= shown; i++) {
+				boolean ws = Character.isWhitespace(text.charAt(i));
+				if (!ws && !inWord) {
+					inWord = true;
+					word++;
+					if (word > shown) break;
+				}
+				if (ws) inWord = false;
+				end = i + 1;
+			}
+			if (shown >= words.length) end = total;
+			return Math.max(0, Math.min(visible, end));
+		}
 		if (cfg.karaoke) {
 			// Words spread evenly over 90% of the line's time
 			List<Integer> wordEnds = new ArrayList<>();

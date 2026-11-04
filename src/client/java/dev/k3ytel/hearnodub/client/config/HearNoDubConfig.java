@@ -47,6 +47,19 @@ public final class HearNoDubConfig {
 	/** Also offer Jimaku's Japanese files (off: only files that look English). */
 	public boolean jimakuJapanese = false;
 
+	/** Song lyrics from LRCLIB when a music app (Spotify...) is playing. No key needed. */
+	public boolean useLrclib = true;
+	/** Better Lyrics: word and syllable synced lyrics (free). */
+	public boolean useBetterLyrics = true;
+	/** NetEase Cloud Music: unofficial, very large synced lyrics catalogue. */
+	public boolean useNetEase = true;
+	/** lyrics.ovh: plain lyrics fallback. */
+	public boolean useLyricsOvh = true;
+	/** Follow the music app when no video is playing. */
+	public boolean lyricsFollowMusic = true;
+	/** Reveal word-synced lyrics word by word, even with karaoke off. */
+	public boolean lyricsWordByWord = true;
+
 	// ---------------------------------------------------------------- look
 	public float textScale = 1.0f;
 	/** Background opacity in percent (0 = no background). */
@@ -90,6 +103,65 @@ public final class HearNoDubConfig {
 	public Animation animation = Animation.FADE_POP;
 	/** Show the upcoming line faintly under the current one. */
 	public boolean nextLinePreview = false;
+
+	// ---------------------------------------------------------------- song lyrics display (karaoke)
+	/** CLASSIC = shown like normal subtitles; SINGLE = the line being sung; STACK = previous, current and next lines. */
+	public LyricsView lyricsView = LyricsView.STACK;
+	public LyricsReveal lyricsReveal = LyricsReveal.DIMMED;
+	/** Colour sweeps across each word as it's sung. */
+	public boolean lyricsFill = true;
+	/** SHOUTED words and words with "!" shake and grow. */
+	public boolean lyricsEmphasis = true;
+	/** Small list of the next lyrics lines at the side of the screen (to plan a shot). */
+	public boolean lyricsUpcoming = false;
+	public LyricsEffect lyricsEffect = LyricsEffect.LIFT;
+	/** Song title and artist when a song starts. */
+	public boolean lyricsTitleCard = true;
+	public float lyricsScale = 1.3f;
+	/** Opacity of words not sung yet (and of the previous/next lines). */
+	public int lyricsDimOpacity = 35;
+	/** Colour words turn as they're sung. */
+	public int lyricsHighlightColor = 0xFFFFFFFF;
+
+	// ---------------------------------------------------------------- 3D pop-in (letters on blocks)
+	public LetterStyle letterStyle = LetterStyle.THICK;
+	public LetterFont letterFont = LetterFont.MINECRAFT;
+	public LetterMaterial letterMaterial = LetterMaterial.COLOR;
+	/** LINE: whole lines; WORD: every word lands on its own spot as it's sung. */
+	public LetterSpawn letterSpawn = LetterSpawn.LINE;
+	/** Use the karaoke settings of the lyrics display on the 3D letters too. */
+	public boolean letterKaraoke = true;
+	/** Letters bounce and glow with the music's real loudness. */
+	public boolean letterAudioReact = true;
+	/** Effects: dust, a bump and a squash when letters land, sparkles on held notes and beats, fireworks at the end of a song. */
+	public boolean letterLandingFx = true;
+	/** Prefer scenic spots: open sky, a view behind, water, toward the sunset. */
+	public boolean letterDirector = true;
+	/** Nearby mobs turn their heads toward a line that just landed. */
+	public boolean letterMobsLook = true;
+	/** Bass makes letters thump, treble makes them shimmer (needs the speakers' sound). */
+	public boolean letterBands = true;
+	/** Rain makes letters wet and dripping; snow settles on top of them. */
+	public boolean letterWeather = true;
+	/** How glow on blocks is drawn with shaders (some packs, like Photon, turn the emissive way black). */
+	public GlowMode glowMode = GlowMode.AUTO;
+	public int letterSoundVolume = 40;
+	/** Chorus lines are a bit bigger and shimmer on the lyrics display. */
+	public boolean lyricsChorus = true;
+	public LetterAnimation letterAnimation = LetterAnimation.DROP;
+	/** 1 = one letter pixel is one block pixel (1/16 block). */
+	public float letterScale = 0.8f;
+	/** How far away a line can land, in blocks. */
+	public float letterDistance = 9f;
+	/** Words never spawn closer than this (blocks). Max distance is {@link #letterDistance}. */
+	public float letterMinDistance = 4f;
+	/** How far from the crosshair (degrees) a line can land. */
+	public int letterSpread = 30;
+	/** Soft shadows on the block under each letter. */
+	public boolean letterShadow = true;
+	/** The letters light up the blocks around them, like the video screen. */
+	public boolean letterGlow = false;
+	public int letterGlowStrength = 60;
 
 	// ---------------------------------------------------------------- pop-in + bubble
 	public float popinDistance = 4.0f;
@@ -258,6 +330,24 @@ public final class HearNoDubConfig {
 		if (stylePreset == null) stylePreset = StylePreset.BOX;
 		if (animation == null) animation = Animation.FADE_POP;
 		if (bubbleTarget == null) bubbleTarget = BubbleTarget.AUTO;
+		if (letterStyle == null) letterStyle = LetterStyle.THICK;
+		if (glowMode == null) glowMode = GlowMode.AUTO;
+		if (letterFont == null) letterFont = LetterFont.MINECRAFT;
+		if (letterMaterial == null) letterMaterial = LetterMaterial.COLOR;
+		if (letterSpawn == null) letterSpawn = LetterSpawn.LINE;
+		letterSoundVolume = Math.max(0, Math.min(100, letterSoundVolume));
+		if (lyricsView == null) lyricsView = LyricsView.STACK;
+		if (lyricsReveal == null) lyricsReveal = LyricsReveal.DIMMED;
+		if (lyricsEffect == null) lyricsEffect = LyricsEffect.LIFT;
+		lyricsScale = Math.max(0.5f, Math.min(3f, lyricsScale));
+		lyricsDimOpacity = Math.max(0, Math.min(100, lyricsDimOpacity));
+		if (letterAnimation == null) letterAnimation = LetterAnimation.DROP;
+		letterScale = Math.max(0.3f, Math.min(3f, letterScale));
+		letterMinDistance = Math.max(2f, Math.min(32f, letterMinDistance == 0 ? 4f : letterMinDistance));
+		letterDistance = Math.max(3f, Math.min(64f, letterDistance));
+		if (letterDistance < letterMinDistance + 1) letterDistance = letterMinDistance + 1;
+		letterSpread = Math.max(5, Math.min(60, letterSpread));
+		letterGlowStrength = Math.max(5, Math.min(100, letterGlowStrength));
 		popinDistance = Math.max(1f, Math.min(16f, popinDistance));
 		popinSpreadX = Math.max(5, Math.min(60, popinSpreadX));
 		popinSpreadY = Math.max(0, Math.min(40, popinSpreadY));
@@ -325,6 +415,11 @@ public final class HearNoDubConfig {
 	}
 
 	/** At least one online source is switched on and has its key. */
+	/** Any song lyrics source is on. */
+	public boolean lyricsReady() {
+		return useLrclib || useBetterLyrics || useNetEase || useLyricsOvh;
+	}
+
 	public boolean anySourceReady() {
 		return osReady() || subdlReady() || jimakuReady();
 	}

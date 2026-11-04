@@ -195,6 +195,11 @@ public final class MediaBridge {
 		return writeCommand(action + " " + app);
 	}
 
+	/** Starts measuring how loud a process is (into audio.bin), or "off". */
+	public boolean meter(String process) {
+		return writeCommand("meter " + process);
+	}
+
 	private boolean writeCommand(String command) {
 		if (status != Status.RUNNING) return false;
 		try {

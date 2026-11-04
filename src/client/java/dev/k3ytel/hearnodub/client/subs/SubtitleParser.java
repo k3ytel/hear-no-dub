@@ -8,7 +8,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Reads .srt, .vtt and .ass/.ssa subtitles into a {@link SubtitleTrack}.
+ * Reads .srt, .vtt, .ass/.ssa subtitles and .lrc lyrics into a {@link SubtitleTrack}.
  * Italics and bold are kept; other styling is dropped. For .ass, sign/typesetting lines
  * are skipped so only dialogue shows, and the "Name" field becomes the speaker.
  */
@@ -26,6 +26,12 @@ public final class SubtitleParser {
 		String lower = content.toLowerCase(Locale.ROOT);
 		if (lower.contains("[events]") && lower.contains("dialogue:")) {
 			return new SubtitleTrack(parseAss(content));
+		}
+		if (TtmlParser.looksLikeTtml(content)) {
+			return new SubtitleTrack(TtmlParser.parse(content));
+		}
+		if (!content.contains("-->") && LyricsParser.looksLikeLrc(content)) {
+			return new SubtitleTrack(LyricsParser.parse(content));
 		}
 		return new SubtitleTrack(parseSrt(content));
 	}

@@ -24,6 +24,10 @@ public record Candidate(String source, String id, String label, String title, in
 			case "os" -> "OpenSubtitles";
 			case "subdl" -> "SubDL";
 			case "jimaku" -> "Jimaku";
+			case "lrclib" -> "LRCLIB";
+			case "betterlyrics" -> "Better Lyrics";
+			case "netease" -> "NetEase";
+			case "lyricsovh" -> "lyrics.ovh";
 			default -> source;
 		};
 	}

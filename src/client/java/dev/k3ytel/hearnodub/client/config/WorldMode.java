@@ -7,6 +7,7 @@ public enum WorldMode {
 	NONE("none"),
 	FLOATING("floating"),
 	POPIN("popin"),
+	POPIN3D("popin3d"),
 	BUBBLE("bubble");
 
 	private final String key;

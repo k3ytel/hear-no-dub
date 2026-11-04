@@ -6,6 +6,7 @@ import net.minecraft.network.chat.Component;
 public enum BubbleTarget {
 	AUTO("auto"),
 	LOOKED_AT("looked_at"),
+	PLAYERS("players"),
 	SELF("self");
 
 	private final String key;
